@@ -8,16 +8,16 @@
 
 [general]
 name=MOPS plugin
-qgisMinimumVersion=2.14
-description=N/A
-version=0.1
-author=LNH Water
+qgisMinimumVersion=2.0
+description=Plugin to use with the program MOPS by LNH Water
+version=0.2
+author=LNH Water ApS
 email=kontakt@lnhwater.dk
 
 about=about text
 
 tracker=lnhwater.dk
-repository=lnhwater.dk
+repository=https://github.com/Felza/mops
 # End of mandatory metadata
 
 # Recommended items:
@@ -26,13 +26,13 @@ repository=lnhwater.dk
 # changelog=
 
 # Tags are comma separated with spaces allowed
-tags=
+tags=MOPS
 
-homepage=
+homepage=lnhwater.dk
 category=Plugins
 icon=icon.png
 # experimental flag
-experimental=True
+experimental=False
 
 # deprecated flag (applies to the whole plugin, not just a single version)
 deprecated=False
