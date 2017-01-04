@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/plugins/mops" >
+        <file>icon.png</file>
+    </qresource>
+</RCC>
