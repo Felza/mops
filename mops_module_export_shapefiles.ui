@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Import</string>
+   <string>Save all layers as shapefiles</string>
   </property>
   <widget class="QDialogButtonBox" name="button_box">
    <property name="geometry">
@@ -32,22 +32,22 @@
   <widget class="QPushButton" name="pushButton">
    <property name="geometry">
     <rect>
-     <x>270</x>
+     <x>280</x>
      <y>110</y>
      <width>91</width>
      <height>23</height>
     </rect>
    </property>
    <property name="text">
-    <string>Choose textfile</string>
+    <string>Browse location</string>
    </property>
   </widget>
   <widget class="QTextEdit" name="textEdit">
    <property name="geometry">
     <rect>
-     <x>10</x>
+     <x>20</x>
      <y>110</y>
-     <width>221</width>
+     <width>251</width>
      <height>31</height>
     </rect>
    </property>

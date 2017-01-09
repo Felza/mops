@@ -26,13 +26,13 @@ import os
 from PyQt4 import QtGui, uic
 
 FORM_CLASS, _ = uic.loadUiType(os.path.join(
-    os.path.dirname(__file__), 'mops_module_name_dialog_base.ui'))
+    os.path.dirname(__file__), 'mops_module_export_shapefiles.ui'))
 
 
-class importDialog(QtGui.QDialog, FORM_CLASS):
+class exportShapefilesDialog(QtGui.QDialog, FORM_CLASS):
     def __init__(self, parent=None):
         """Constructor."""
-        super(importDialog, self).__init__(parent)
+        super(exportShapefilesDialog, self).__init__(parent)
         # Set up the user interface from Designer.
         # After setupUI you can access any designer object by doing
         # self.<objectname>, and you can use autoconnect slots - see

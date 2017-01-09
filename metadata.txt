@@ -14,9 +14,9 @@ version=0.2
 author=LNH Water ApS
 email=kontakt@lnhwater.dk
 
-about=about text
+about= N/A
 
-tracker=lnhwater.dk
+tracker=https://github.com/Felza/mops
 repository=https://github.com/Felza/mops
 # End of mandatory metadata
 
@@ -28,7 +28,7 @@ repository=https://github.com/Felza/mops
 # Tags are comma separated with spaces allowed
 tags=MOPS
 
-homepage=lnhwater.dk
+homepage=http://www.lnhwater.dk/
 category=Plugins
 icon=icon.png
 # experimental flag

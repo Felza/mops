@@ -21,14 +21,18 @@
  ***************************************************************************/
 """
 from PyQt4.QtCore import *
-from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPoint, QgsMapLayerRegistry
+#from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPoint, QgsMapLayerRegistry, QgsVectorFileWriter
+from qgis.core import *
 from PyQt4.QtGui import QAction, QIcon, QFileDialog
 # Initialize Qt resources from file resources.py
 import resources
 # Import the code for the dialog
-from mops_module_name_dialog import mopsDialog
+from mops_module_name_dialog import importDialog
 from mops_module_save import saveDialog
+from mops_module_export_shapefiles import exportShapefilesDialog
+from os.path import isfile, join, expanduser
 import os.path
+from os import listdir
 
 
 class mops:
@@ -137,12 +141,16 @@ class mops:
         """
 
         # Create the dialog (after translation) and keep reference
-        self.dlg = mopsDialog()
-        self.dlg.textEdit.clear()
-        self.dlg.pushButton.clicked.connect(self.select_input_file)
+        self.dlg = importDialog()
+        #self.dlg.textEdit.clear()
+        self.dlg.textEdit.setText("E:\Desktop\TestModel_MUQGIS")
+        self.dlg.pushButton.clicked.connect(self.select_input_folder)
         self.dlg2 = saveDialog()
         self.dlg2.textEdit.clear()
         self.dlg2.pushButton.clicked.connect(self.select_output_file)
+        self.dlg3 = exportShapefilesDialog()
+        self.dlg3.textEdit.clear()
+        self.dlg3.pushButton.clicked.connect(self.select_output_folder)
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
@@ -172,14 +180,26 @@ class mops:
         icon_path = ':/plugins/mops/icon.png'
         self.add_action(
             icon_path,
-            text=self.tr(u'Import nodes'),
+            text=self.tr(u'Import'),
             callback=self.importdlg,
             parent=self.iface.mainWindow())
 
         self.add_action(
             icon_path,
-            text=self.tr(u'Export nodes'),
+            text=self.tr(u'Export'),
             callback=self.exportdlg,
+            parent=self.iface.mainWindow())
+
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Move lines to nodes'),
+            callback=self.moveLines,
+            parent=self.iface.mainWindow())
+
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Save all layers as Shapefiles'),
+            callback=self.exportShapefiles,
             parent=self.iface.mainWindow())
 
     def unload(self):
@@ -192,29 +212,126 @@ class mops:
         # remove the toolbar
         del self.toolbar
 
+    def exportShapefiles(self):
+        # show the dialog
+        self.dlg3.show()
+        # Run the dialog event loop
+        result = self.dlg3.exec_()
+        # See if OK was pressed
+        if result:
+            layers = self.iface.legendInterface().layers()
+            foldername = self.dlg3.textEdit.toPlainText()
+            for layer in layers:
+                QgsVectorFileWriter.writeAsVectorFormat(layer,
+                    foldername + "\\" + layer.name() + ".shp","utf-8", layer.crs() ,"ESRI Shapefile")
+                
+
+    #Move lines to their from and to nodes
+    def moveLines(self):
+        layers = self.iface.legendInterface().layers()
+        for layer in layers:
+            if layer.wkbType()==2:
+                layer.startEditing()
+                if layer.name() == "CatchCon":
+                    catchLayer = QgsMapLayerRegistry.instance().mapLayersByName("Catchment")[0]
+                    pointLayer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
+                    for feature in layer.getFeatures():
+                        #Get the coords of the FROMNODE
+                        fromnode = feature['CatchID']
+                        expr = QgsExpression( "\"CatchMUID\"='{}'".format(fromnode))
+                        it = catchLayer.getFeatures( QgsFeatureRequest( expr ) )
+                        for pfeat in it:
+                            frompoint = pfeat.geometry().asPoint()
+                        #Get the coords of the TONODE
+                        tonode = feature['NodeID']
+                        expr = QgsExpression( "\"MUID\"='{}'".format(tonode))
+                        it = pointLayer.getFeatures( QgsFeatureRequest( expr ) )
+                        for pfeat in it:
+                            topoint = pfeat.geometry().asPoint()
+                        #Get and fix the line coords
+                        points = feature.geometry().asPolyline()
+                        points = points[1:-1]
+                        points.insert(0,frompoint)
+                        if tonode == "NULL":
+                            points.append(QgsPoint(frompoint.x()+2,frompoint.y()+2))
+                        else:
+                            points.append(topoint)
+                        layer.changeGeometry(feature.id(),QgsGeometry.fromPolyline(points))
+                elif layer.name() == "LoadCon":
+                    loadLayer = QgsMapLayerRegistry.instance().mapLayersByName("Load")[0]
+                    pointLayer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
+                    for feature in layer.getFeatures():
+                        #Get the coords of the FROMNODE
+                        fromnode = feature['MUID']
+                        expr = QgsExpression( "\"MUID\"='{}'".format(fromnode))
+                        it = loadLayer.getFeatures( QgsFeatureRequest( expr ) )
+                        for pfeat in it:
+                            frompoint = pfeat.geometry().asPoint()
+                        #Get the coords of the TONODE
+                        tonode = feature['MOUSENodeID']
+                        expr = QgsExpression( "\"MUID\"='{}'".format(tonode))
+                        it = pointLayer.getFeatures( QgsFeatureRequest( expr ) )
+                        for pfeat in it:
+                            topoint = pfeat.geometry().asPoint()
+                        #Get and fix the line coords
+                        points = feature.geometry().asPolyline()
+                        points = points[1:-1]
+                        points.insert(0,frompoint)
+                        if tonode == "NULL":
+                            points.append(QgsPoint(frompoint.x()+2,frompoint.y()+2))
+                        else:
+                            points.append(topoint)
+                        layer.changeGeometry(feature.id(),QgsGeometry.fromPolyline(points))
+                else:
+                    #All other lines
+                    pointLayer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
+                    for feature in layer.getFeatures():
+                        #Get the coords of the FROMNODE
+                        fromnode = feature['FROMNODE']
+                        expr = QgsExpression( "\"MUID\"='{}'".format(fromnode))
+                        it = pointLayer.getFeatures( QgsFeatureRequest( expr ) )
+                        for pfeat in it:
+                            frompoint = pfeat.geometry().asPoint()
+                        #Get the coords of the TONODE
+                        tonode = feature['TONODE']
+                        expr = QgsExpression( "\"MUID\"='{}'".format(tonode))
+                        it = pointLayer.getFeatures( QgsFeatureRequest( expr ) )
+                        for pfeat in it:
+                            topoint = pfeat.geometry().asPoint()
+                        #Get and fix the line coords
+                        points = feature.geometry().asPolyline()
+                        points = points[1:-1]
+                        points.insert(0,frompoint)
+                        if tonode == "NULL":
+                            points.append(QgsPoint(frompoint.x()+2,frompoint.y()+2))
+                        else:
+                            points.append(topoint)
+                        layer.changeGeometry(feature.id(),QgsGeometry.fromPolyline(points))
+                layer.commitChanges()
 
     def importdlg(self):
-        """Run method that performs all the real work"""
         # show the dialog
         self.dlg.show()
         # Run the dialog event loop
         result = self.dlg.exec_()
         # See if OK was pressed
         if result:
-            filename = self.dlg.textEdit.toPlainText()
-            input = open(filename, 'r')
-            inputline = input.readline()
-            while (inputline != "ENDOFFILE"):
-                if inputline == "POINTS\n":
-                    self.points(input)
-                elif inputline == "LINES\n":
-                    self.lines(input)
-
-                inputline = input.readline()
-            
+            folderpath = self.dlg.textEdit.toPlainText()
+            #Go through all files in the folder
+            for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                if file[-4:] == ".txt":
+                    input = open(folderpath + "\\" + file, 'r')
+                    inputline = input.readline()
+                    while (inputline != "ENDOFFILE"):
+                        if inputline == "POINT\n":
+                            self.points(input)
+                        elif inputline == "LINES\n":
+                            self.lines(input)
+                        inputline = input.readline()
+                if file[-4:] == ".shp":
+                    layer = self.iface.addVectorLayer(folderpath + "\\" + file, file[:-4], "ogr")
 
     def exportdlg(self):
-        """Run method that performs all the real work"""
         # show the dialog
         self.dlg2.show()
         # Run the dialog event loop
@@ -226,19 +343,15 @@ class mops:
             layers = self.iface.legendInterface().layers()
             for layer in layers:
                 if layer.wkbType()==1:
-                    output_file.write("POINTS\n")
-                    self.writeLayer(layer,output_file)
-                    output_file.write("ENDOFPOINTS\n")
+                    self.writePoint(layer,output_file)
                 if layer.wkbType()==2:
-                    output_file.write("LINES\n")
-                    self.writeLayer(layer,output_file)
-                    output_file.write("ENDOFLINES\n")
+                    self.writeLine(layer,output_file)
             output_file.write("ENDOFFILE")
             output_file.close()
 
-
-    def writeLayer(self,layer,output_file):
-        #print name
+    def writePoint(self,layer,output_file):
+        #print type and name
+        output_file.write("POINT\n")
         output_file.write(layer.name() + '\n')
         #print heading of features
         fields = layer.pendingFields()
@@ -249,21 +362,60 @@ class mops:
             if field.typeName() == "string":
                 line += "::" + str(field.length())
             line += ";;"
-        line = line[:-2] + '\n'
+        #add coordinates heading
+        line += "X_POINT;;Y_POINT\n"
         output_file.write(line)
         #print features
         for f in layer.getFeatures():
-            line = ';;'.join(unicode(f[x]) for x in fieldnames) + '\n'
+            line = ';;'.join(unicode(f[x]) for x in fieldnames)
+            geom = f.geometry()
+            line += ";;" + str(geom.asPoint().x()) + ";;" + str(geom.asPoint().y()) + "\n"
             unicode_line = line.encode('utf-8')
             output_file.write(unicode_line)
+        output_file.write("ENDOFPOINTS\n")
+        
+    def writeLine(self,layer,output_file):
+        #print type and name
+        output_file.write("LINES\n")
+        output_file.write(layer.name() + '\n')
+        #print heading of features
+        fields = layer.pendingFields()
+        fieldnames = [field.name() for field in fields]
+        line = ""
+        for field in fields:
+            line += field.name() + ".." + field.typeName()
+            if field.typeName() == "string":
+                line += "::" + str(field.length())
+            line += ";;"
+        #add coordinates heading
+        line += "Points\n"
+        output_file.write(line)
+        #print features
+        for f in layer.getFeatures():
+            line = ';;'.join(unicode(f[x]) for x in fieldnames) + ";;"
+            geom = f.geometry()
+            for point in geom.asPolyline():
+                line += str(point.x()) + ".." + str(point.y()) + "::"
+            line = line[:-2] + "\n"
+            unicode_line = line.encode('utf-8')
+            output_file.write(unicode_line)
+        output_file.write("ENDOFLINES\n")
 
     def select_output_file(self):
         filename = QFileDialog.getSaveFileName(self.dlg2, "Select output file ","", '*.txt')
         self.dlg2.textEdit.setText(filename)
 
-    def select_input_file(self):
+    """def select_input_file(self):
         filename = QFileDialog.getOpenFileName(self.dlg, "Select input file ","", '*.txt')
-        self.dlg.textEdit.setText(filename)
+        self.dlg.textEdit.setText(filename)"""
+    
+    def select_input_folder(self):
+         foldername = QFileDialog.getExistingDirectory(self.dlg, "Select input folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
+         self.dlg.textEdit.setText(foldername)
+    
+    def select_output_folder(self):
+        foldername = QFileDialog.getExistingDirectory(self.dlg3, "Select output folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
+        self.dlg3.textEdit.setText(foldername)
 
     def createuri(self, attributes):
         uri = "";
@@ -278,10 +430,12 @@ class mops:
                 uri = uri + "&field=" + attributeSplit[0] + ":double"
         return uri
 
+    #For importing
     def points(self,input):
         name = input.readline().rstrip('\n')
         #Set the attribute names and types
         attributes = input.readline().rstrip('\n').split(";;")
+        del attributes[-2:]
         uri = "Point?crs=epsg:4326" + self.createuri(attributes)
         vl = QgsVectorLayer(uri, name, "memory")
         pr = vl.dataProvider()
@@ -294,24 +448,22 @@ class mops:
         #Insert the data into the layer
         for line in data:
             fet = QgsFeature()
-            lineArray = line.rstrip('\n').split(";;")
-            i = 0
-            for attribute in attributes:
-                if attribute == "X_POINT..double":
-                    x = float(lineArray[i])
-                if attribute == "Y_POINT..double":
-                    y = float(lineArray[i])
-                i+=1
+            lineList = line.rstrip('\n').split(";;")
+            #Remove last 2 elements and use them for geometry
+            y = float(lineList.pop())
+            x = float(lineList.pop())
             fet.setGeometry(QgsGeometry.fromPoint(QgsPoint(x, y)))
-            fet.setAttributes(lineArray)
+            fet.setAttributes(lineList)
             pr.addFeatures( [ fet ] )
             vl.updateExtents()
         QgsMapLayerRegistry.instance().addMapLayer(vl)
 
+    #For importing
     def lines(self,input):
         name = input.readline().rstrip('\n')
         #Set the attribute names and types
         attributes = input.readline().rstrip('\n').split(";;")
+        del attributes[-1:]
         uri = "LineString?crs=epsg:4326" + self.createuri(attributes)
         vl = QgsVectorLayer(uri, name, "memory")
         pr = vl.dataProvider()
@@ -323,7 +475,7 @@ class mops:
         for line in data:
             lineArray = line.rstrip('\n').split(";;")
             #Getting coordinates
-            cordList = lineArray[-1].split("::")
+            cordList = lineArray.pop().split("::")
             geoList = []
             for cord in cordList:
                 xy = cord.split("..")
