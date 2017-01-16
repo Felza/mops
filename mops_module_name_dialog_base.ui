@@ -42,14 +42,17 @@
     <string>Choose textfile</string>
    </property>
   </widget>
-  <widget class="QTextEdit" name="textEdit">
+  <widget class="QComboBox" name="textEdit">
    <property name="geometry">
     <rect>
-     <x>10</x>
-     <y>110</y>
+     <x>20</x>
+     <y>100</y>
      <width>221</width>
      <height>31</height>
     </rect>
+   </property>
+   <property name="editable">
+    <bool>true</bool>
    </property>
   </widget>
  </widget>

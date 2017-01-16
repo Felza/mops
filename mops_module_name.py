@@ -30,6 +30,7 @@ import resources
 from mops_module_name_dialog import importDialog
 from mops_module_save import saveDialog
 from mops_module_export_shapefiles import exportShapefilesDialog
+from mops_module_export_polygon_to_text import exportPolygonToTextDialog
 from os.path import isfile, join, expanduser
 import os.path
 from os import listdir
@@ -37,6 +38,7 @@ from os import listdir
 
 class mops:
     """QGIS Plugin Implementation."""
+
 
     def __init__(self, iface):
         """Constructor.
@@ -139,18 +141,15 @@ class mops:
             added to self.actions list.
         :rtype: QAction
         """
-
         # Create the dialog (after translation) and keep reference
         self.dlg = importDialog()
-        #self.dlg.textEdit.clear()
-        self.dlg.textEdit.setText("E:\Desktop\TestModel_MUQGIS")
         self.dlg.pushButton.clicked.connect(self.select_input_folder)
         self.dlg2 = saveDialog()
-        self.dlg2.textEdit.clear()
         self.dlg2.pushButton.clicked.connect(self.select_output_file)
         self.dlg3 = exportShapefilesDialog()
-        self.dlg3.textEdit.clear()
-        self.dlg3.pushButton.clicked.connect(self.select_output_folder)
+        self.dlg3.pushButton.clicked.connect(self.select_output_dlg3)
+        self.dlg4 = exportPolygonToTextDialog()
+        self.dlg4.pushButton.clicked.connect(self.select_output_dlg4)
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
@@ -186,8 +185,14 @@ class mops:
 
         self.add_action(
             icon_path,
-            text=self.tr(u'Export'),
+            text=self.tr(u'Export lines and points to textfile'),
             callback=self.exportdlg,
+            parent=self.iface.mainWindow())
+
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Export polygon layers to textfiles'),
+            callback=self.exportPolygons,
             parent=self.iface.mainWindow())
 
         self.add_action(
@@ -206,18 +211,77 @@ class mops:
         # remove the toolbar
         del self.toolbar
 
+    def exportPolygons(self):
+        #Getting recentpaths
+        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
+            content = f.readlines()
+        content = [x.strip() for x in content]
+        self.dlg4.textEdit.clear()
+        self.dlg4.textEdit.addItems(content[6:9])
+        # show the dialog
+        self.dlg4.show()
+        # Run the dialog event loop
+        result = self.dlg4.exec_()
+        # See if OK was pressed
+        if result:
+            #Update combobox of recent paths by adding the new one
+            folderpath = self.dlg4.textEdit.currentText()
+            if folderpath not in content[6:9]:
+                content[8] = content[7]
+                content[7] = content[6]
+                content[6] = folderpath
+                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
+                for line in content:
+                    output_file.write(line+"\n")
+                output_file.close()
+            layers = self.iface.legendInterface().layers()
+            for layer in layers:
+                if layer.wkbType()==3:
+                    output_file = open(folderpath + "\\" + layer.name() + ".txt", 'w')
+                    output_file.write("CatchID, Sqn, X, Y\n")
+                    for feature in layer.getFeatures():
+                        id = feature.attributes()[0]
+                        polygon = feature.geometry().asPolygon()
+                        i = 1
+                        #The first item of polygon is the polyline of the outer ring
+                        if polygon:
+                            for point in polygon[0]:
+                                output_file.write(id + "\t" + str(i) + "\t" + str(point.x()) + "\t" + str(point.y()) + "\n")
+                                i += 1
+                        else:
+                            #This feature has no geometry
+                            print(id)
+                    output_file.close()
+
+
     def exportShapefiles(self):
+        #Getting recentpaths
+        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
+            content = f.readlines()
+        content = [x.strip() for x in content]
+        self.dlg3.textEdit.clear()
+        self.dlg3.textEdit.addItems(content[3:6])
         # show the dialog
         self.dlg3.show()
         # Run the dialog event loop
         result = self.dlg3.exec_()
         # See if OK was pressed
         if result:
+            #Update combobox of recent paths by adding the new one
+            folderpath = self.dlg3.textEdit.currentText()
+            if folderpath not in content[3:6]:
+                content[5] = content[4]
+                content[4] = content[3]
+                content[3] = folderpath
+                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
+                for line in content:
+                    output_file.write(line+"\n")
+                output_file.close()
+            #Save layers as shapefiles
             layers = self.iface.legendInterface().layers()
-            foldername = self.dlg3.textEdit.toPlainText()
             for layer in layers:
                 QgsVectorFileWriter.writeAsVectorFormat(layer,
-                    foldername + "\\" + layer.name() + ".shp","utf-8", layer.crs() ,"ESRI Shapefile")
+                    folderpath + "\\" + layer.name() + ".shp","utf-8", layer.crs() ,"ESRI Shapefile")
 
 
     def moveLines(self, layerId, geoMap):
@@ -228,6 +292,7 @@ class mops:
                 for lineLayer in layers:
                     if lineLayer.wkbType()==2:
                         lineLayer.startEditing()
+                        #Fix all "fromnodes" for Catchment
                         if pointLayer.name() == "Catchment":
                             if lineLayer.name() == "CatchCon":
                                 catchmuid = feature['CatchMUID']
@@ -237,6 +302,7 @@ class mops:
                                     points = points[1:]
                                     points.insert(0,feature.geometry().asPoint())
                                     lineLayer.changeGeometry(lineFeature.id(),QgsGeometry.fromPolyline(points))
+                        #Fix all "fromnodes" for Load
                         elif pointLayer.name() == "Load":
                             if lineLayer.name() == "LoadCon":
                                 muid = feature['MUID']
@@ -246,7 +312,7 @@ class mops:
                                     points = points[1:]
                                     points.insert(0,feature.geometry().asPoint())
                                     lineLayer.changeGeometry(lineFeature.id(),QgsGeometry.fromPolyline(points))
-                        else:
+                        elif pointLayer.name() == "Node":
                             #Fix all from- and tonode for Node
                             muid = feature['MUID']
                             if lineLayer.name() == "CatchCon":
@@ -278,15 +344,112 @@ class mops:
                                     lineLayer.changeGeometry(lineFeature.id(),QgsGeometry.fromPolyline(points))
                         lineLayer.commitChanges()
 
+
+    def moveLinesToNewNodes(self, layerId, changedAttributesMap):
+        lineLayer = QgsMapLayerRegistry.instance().mapLayer(layerId)
+        layerName = lineLayer.name()
+        pr = lineLayer.dataProvider()
+        for featureId, qgsAttributeMap in changedAttributesMap.items():
+            fromChanged = False
+            #Getting the line feature
+            for f in lineLayer.getFeatures(QgsFeatureRequest(featureId)):
+                lineFeature = f
+            for fieldID, newValue in qgsAttributeMap.items():
+                field = lineLayer.attributeDisplayName(fieldID)
+                if layerName=="CatchCon":
+                    if field == "CatchID":
+                        catchLayer = QgsMapLayerRegistry.instance().mapLayersByName("Catchment")[0]
+                        expr = QgsExpression( "\"CatchMUID\"='{}'".format(newValue))
+                        for catchFeature in catchLayer.getFeatures( QgsFeatureRequest(expr)):
+                            points = lineFeature.geometry().asPolyline()
+                            points = points[1:]
+                            points.insert(0,catchFeature.geometry().asPoint())
+                            geoMap = {}
+                            geoMap[featureId] = QgsGeometry.fromPolyline(points)
+                            pr.changeGeometryValues(geoMap)
+                            fromChanged = True
+                    if field == "NodeID":
+                        nodeLayer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
+                        expr = QgsExpression( "\"MUID\"='{}'".format(newValue))
+                        for nodeFeature in nodeLayer.getFeatures( QgsFeatureRequest(expr)):
+                            if not fromChanged:                                
+                                points = lineFeature.geometry().asPolyline()
+                            points = points[:-1]
+                            points.append(nodeFeature.geometry().asPoint())
+                            geoMap = {}
+                            geoMap[featureId] = QgsGeometry.fromPolyline(points)
+                            pr.changeGeometryValues(geoMap)
+                elif layerName=="LoadCon":
+                    if field == "MUID":
+                        loadLayer = QgsMapLayerRegistry.instance().mapLayersByName("Load")[0]
+                        expr = QgsExpression( "\"MUID\"='{}'".format(newValue))
+                        for loadFeature in loadLayer.getFeatures( QgsFeatureRequest(expr)):
+                            points = lineFeature.geometry().asPolyline()
+                            points = points[1:]
+                            points.insert(0,loadFeature.geometry().asPoint())
+                            geoMap = {}
+                            geoMap[featureId] = QgsGeometry.fromPolyline(points)
+                            pr.changeGeometryValues(geoMap)
+                            fromChanged = True
+                    if field == "MOUSENodeID":
+                        nodeLayer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
+                        expr = QgsExpression( "\"MUID\"='{}'".format(newValue))
+                        for nodeFeature in nodeLayer.getFeatures( QgsFeatureRequest(expr)):
+                            if not fromChanged:                                
+                                points = lineFeature.geometry().asPolyline()
+                            points = points[:-1]
+                            points.append(nodeFeature.geometry().asPoint())
+                            geoMap = {}
+                            geoMap[featureId] = QgsGeometry.fromPolyline(points)
+                            pr.changeGeometryValues(geoMap)
+                else:
+                    nodeLayer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
+                    expr = QgsExpression( "\"MUID\"='{}'".format(newValue))
+                    for nodeFeature in nodeLayer.getFeatures( QgsFeatureRequest(expr)):
+                        if field == "FROMNODE":
+                            points = lineFeature.geometry().asPolyline()
+                            points = points[1:]
+                            points.insert(0,nodeFeature.geometry().asPoint())
+                            geoMap = {}
+                            geoMap[featureId] = QgsGeometry.fromPolyline(points)
+                            pr.changeGeometryValues(geoMap)
+                            fromChanged = True
+                        if field == "TONODE":
+                            if not fromChanged:                                
+                                points = lineFeature.geometry().asPolyline()
+                            points = points[:-1]
+                            points.append(nodeFeature.geometry().asPoint())
+                            geoMap = {}
+                            geoMap[featureId] = QgsGeometry.fromPolyline(points)
+                            pr.changeGeometryValues(geoMap)
+        lineLayer.updateExtents()
+            
+
     def importdlg(self):
+        #Getting recentpaths
+        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
+            content = f.readlines()
+        content = [x.strip() for x in content]
+        self.dlg.textEdit.clear()
+        self.dlg.textEdit.addItems(content[0:3])
         # show the dialog
         self.dlg.show()
         # Run the dialog event loop
         result = self.dlg.exec_()
         # See if OK was pressed
         if result:
-            folderpath = self.dlg.textEdit.toPlainText()
-            #Go through all files in the folder
+            #Update combobox of recent paths by adding the new one
+            folderpath = self.dlg.textEdit.currentText()
+            if folderpath not in content[0:3]:
+                content[2] = content[1]
+                content[1] = content[0]
+                content[0] = folderpath
+                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
+                for line in content:
+                    output_file.write(line+"\n")
+                output_file.close()
+            #Go through all files in the folder and find the text file
+            #Add the points
             for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
                 if file[-4:] == ".txt":
                     input = open(folderpath + "\\" + file, 'r')
@@ -294,11 +457,45 @@ class mops:
                     while (inputline != "ENDOFFILE"):
                         if inputline == "POINT\n":
                             self.points(input)
-                        elif inputline == "LINES\n":
+                        inputline = input.readline()
+            #Go through all files in the folder and find the text file
+            #Add the lines
+            #This is done after, because the lines will need the points for field configuration
+            for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                if file[-4:] == ".txt":
+                    input = open(folderpath + "\\" + file, 'r')
+                    inputline = input.readline()
+                    while (inputline != "ENDOFFILE"):
+                        if inputline == "LINES\n":
                             self.lines(input)
                         inputline = input.readline()
+            #Get the polygon layer by a shapefile and create new "small polygon layer"
+            for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
                 if file[-4:] == ".shp":
-                    layer = self.iface.addVectorLayer(folderpath + "\\" + file, file[:-4], "ogr")
+                    large = QgsVectorLayer(folderpath + "\\" + file, file[:-4], "ogr")
+                    dict_a = {}
+                    dict_feat_a = {}
+                    for feat in large.getFeatures():
+                        dict_a[feat.id()] = feat['MopsID']
+                        dict_feat_a[feat.id()] = feat
+                    catchLayer = QgsMapLayerRegistry.instance().mapLayersByName("Catchment")[0]
+                    dict_b = {}
+                    for ft in catchLayer.getFeatures():
+                        dict_b[ft.id()] = ft['CatchMUID']
+                    int_list = list(set(dict_a.values()) & set(dict_b.values()))
+                    newFeatures = []
+
+                    for k, v in dict_a.iteritems():
+                        if v  in int_list:
+                            newFeatures.append(dict_feat_a[k])
+
+                    small = QgsVectorLayer("Polygon?crs=epsg:4326&field=MopsID:string(40)", large.name(), "memory")
+                    pr = small.dataProvider()
+                    pr.addFeatures(newFeatures)
+                    small.updateExtents()
+                    #Load in the "small polygon layer" in the bottom of the layer table
+                    QgsMapLayerRegistry.instance().addMapLayer(small, False)
+                    QgsProject.instance().layerTreeRoot().addLayer(small)
 
     #For importing
     def points(self,input):
@@ -337,6 +534,38 @@ class mops:
         del attributes[-1:]
         uri = "LineString?crs=epsg:4326" + self.createuri(attributes)
         vl = QgsVectorLayer(uri, name, "memory")
+        ############## creating ValueMaps for all kind of from- and tonodes, so only relevant points can be chosen
+        nodeLayer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
+        nodeIDs = {}
+        for feature in nodeLayer.getFeatures():
+            f = feature['MUID']
+            nodeIDs[f] = f
+        if name == 'CatchCon':
+            catchmentLayer = QgsMapLayerRegistry.instance().mapLayersByName("Catchment")[0]
+            catchmentIDs = {}
+            for feature in catchmentLayer.getFeatures():
+                f = feature['CatchMUID']
+                catchmentIDs[f] = f
+            vl.setEditorWidgetV2(vl.fieldNameIndex('CatchID'),'ValueMap')
+            vl.setEditorWidgetV2(vl.fieldNameIndex('NodeID'),'ValueMap')
+            vl.setEditorWidgetV2Config(vl.fieldNameIndex('CatchID'),catchmentIDs)
+            vl.setEditorWidgetV2Config(vl.fieldNameIndex('NodeID'),nodeIDs)
+        elif name == 'LoadCon':
+            loadLayer = QgsMapLayerRegistry.instance().mapLayersByName("Load")[0]
+            loadIDs = {}
+            for feature in loadLayer.getFeatures():
+                f = feature['MUID']
+                loadIDs[f] = f
+            vl.setEditorWidgetV2(vl.fieldNameIndex('MUID'),'ValueMap')
+            vl.setEditorWidgetV2(vl.fieldNameIndex('MOUSENodeID'),'ValueMap')
+            vl.setEditorWidgetV2Config(vl.fieldNameIndex('FROMUIDMNODE'),loadIDs)
+            vl.setEditorWidgetV2Config(vl.fieldNameIndex('MOUSENodeID'),nodeIDs)
+        else:
+            vl.setEditorWidgetV2(vl.fieldNameIndex('FROMNODE'),'ValueMap')
+            vl.setEditorWidgetV2(vl.fieldNameIndex('TONODE'),'ValueMap')
+            vl.setEditorWidgetV2Config(vl.fieldNameIndex('FROMNODE'),nodeIDs)
+            vl.setEditorWidgetV2Config(vl.fieldNameIndex('TONODE'),nodeIDs)
+        ##############
         pr = vl.dataProvider()
         data = []
         inputline = input.readline()
@@ -356,17 +585,33 @@ class mops:
             fet.setAttributes(lineArray)
             pr.addFeatures( [ fet ] )
             vl.updateExtents()
+        vl.committedAttributeValuesChanges.connect(self.moveLinesToNewNodes)
         QgsMapLayerRegistry.instance().addMapLayer(vl)
 
     def exportdlg(self):
+        #Getting recentpaths
+        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
+            content = f.readlines()
+        content = [x.strip() for x in content]
+        self.dlg2.textEdit.clear()
+        self.dlg2.textEdit.addItems(content[9:12])
         # show the dialog
         self.dlg2.show()
         # Run the dialog event loop
         result = self.dlg2.exec_()
         # See if OK was pressed
         if result:
-            filename = self.dlg2.textEdit.toPlainText()
-            output_file = open(filename, 'w')
+            #Update combobox of recent paths by adding the new one
+            filepath = self.dlg2.textEdit.currentText()
+            if filepath not in content[9:12]:
+                content[11] = content[10]
+                content[10] = content[9]
+                content[9] = filepath
+                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
+                for line in content:
+                    output_file.write(line+"\n")
+                output_file.close()
+            output_file = open(filepath, 'w')
             layers = self.iface.legendInterface().layers()
             for layer in layers:
                 if layer.wkbType()==1:
@@ -430,19 +675,23 @@ class mops:
 
     def select_output_file(self):
         filename = QFileDialog.getSaveFileName(self.dlg2, "Select output file ","", '*.txt')
-        self.dlg2.textEdit.setText(filename)
+        self.dlg2.textEdit.lineEdit().setText(filename)
 
     """def select_input_file(self):
         filename = QFileDialog.getOpenFileName(self.dlg, "Select input file ","", '*.txt')
         self.dlg.textEdit.setText(filename)"""
     
     def select_input_folder(self):
-         foldername = QFileDialog.getExistingDirectory(self.dlg, "Select input folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
-         self.dlg.textEdit.setText(foldername)
+        foldername = QFileDialog.getExistingDirectory(self.dlg, "Select input folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
+        self.dlg.textEdit.lineEdit().setText(foldername)
     
-    def select_output_folder(self):
+    def select_output_dlg3(self):
         foldername = QFileDialog.getExistingDirectory(self.dlg3, "Select output folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
-        self.dlg3.textEdit.setText(foldername)
+        self.dlg3.textEdit.lineEdit().setText(foldername)
+
+    def select_output_dlg4(self):
+        foldername = QFileDialog.getExistingDirectory(self.dlg4, "Select output folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
+        self.dlg4.textEdit.lineEdit().setText(foldername)
 
     def createuri(self, attributes):
         uri = "";
