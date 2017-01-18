@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Save all layers as shapefiles</string>
+   <string>Save changes made in the polygon layer</string>
   </property>
   <widget class="QDialogButtonBox" name="button_box">
    <property name="geometry">

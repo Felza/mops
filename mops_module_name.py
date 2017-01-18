@@ -31,6 +31,8 @@ from mops_module_name_dialog import importDialog
 from mops_module_save import saveDialog
 from mops_module_export_shapefiles import exportShapefilesDialog
 from mops_module_export_polygon_to_text import exportPolygonToTextDialog
+from mops_module_export_style import exportStyle
+from mops_module_export_polygonChanges import exportPolygonChanges
 from os.path import isfile, join, expanduser
 import os.path
 from os import listdir
@@ -150,6 +152,10 @@ class mops:
         self.dlg3.pushButton.clicked.connect(self.select_output_dlg3)
         self.dlg4 = exportPolygonToTextDialog()
         self.dlg4.pushButton.clicked.connect(self.select_output_dlg4)
+        self.dlg5 = exportPolygonChanges()
+        self.dlg5.pushButton.clicked.connect(self.select_output_dlg5)
+        self.dlg6 = exportStyle()
+        self.dlg6.pushButton.clicked.connect(self.select_output_dlg6)
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
@@ -185,13 +191,13 @@ class mops:
 
         self.add_action(
             icon_path,
-            text=self.tr(u'Export lines and points to textfile'),
+            text=self.tr(u'Save lines and points to textfile'),
             callback=self.exportdlg,
             parent=self.iface.mainWindow())
 
         self.add_action(
             icon_path,
-            text=self.tr(u'Export polygon layers to textfiles'),
+            text=self.tr(u'Save polygon layers to textfiles'),
             callback=self.exportPolygons,
             parent=self.iface.mainWindow())
 
@@ -199,6 +205,18 @@ class mops:
             icon_path,
             text=self.tr(u'Save all layers as Shapefiles'),
             callback=self.exportShapefiles,
+            parent=self.iface.mainWindow())
+
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Save changes made in the polygon layer'),
+            callback=self.savePolygonChanges,
+            parent=self.iface.mainWindow())
+
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Save or import styles'),
+            callback=self.exportOrSaveStyle,
             parent=self.iface.mainWindow())
 
     def unload(self):
@@ -211,6 +229,93 @@ class mops:
         # remove the toolbar
         del self.toolbar
 
+    def savePolygonChanges(self):
+        #Getting recentpaths
+        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
+            content = f.readlines()
+        content = [x.strip() for x in content]
+        self.dlg5.textEdit.clear()
+        self.dlg5.textEdit.addItems(content[15:18])
+        # show the dialog
+        self.dlg5.show()
+        # Run the dialog event loop
+        result = self.dlg5.exec_()
+        # See if OK was pressed
+        if result:
+            #Update combobox of recent paths by adding the new one
+            filepath = self.dlg5.textEdit.currentText()
+            if filepath not in content[15:18]:
+                content[17] = content[16]
+                content[16] = content[15]
+                content[15] = filepath
+                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
+                for line in content:
+                    output_file.write(line+"\n")
+                output_file.close()
+            #Do stuff
+            for small in self.iface.legendInterface().layers():
+                if small.wkbType()==3:
+                    if small.name()[-5:] == "SMALL":
+                        large = QgsVectorLayer(filepath, "namedoesnotmatter", "ogr")
+                        dict_small = {}
+                        dict_large = {}
+                        listOfIds = []
+                        for f in large.getFeatures():
+                            dict_large[f['MopsID']] = f
+                            listOfIds.append(f.id())
+                        for feat in small.getFeatures():
+                            dict_small[feat['MopsID']] = feat
+                        small_IDlist = dict_small.keys()
+                        newFeatures = []
+                        for k, v in dict_large.iteritems():
+                            if k in small_IDlist:
+                                newFeatures.append(dict_small[k])
+                            else:
+                                newFeatures.append(v)
+                        new_layer = QgsVectorLayer("Polygon?crs=epsg:4326", "duplicated_layer", "memory")
+                        new_layer_data = new_layer.dataProvider()
+                        attr = large.dataProvider().fields().toList()
+                        new_layer_data.addAttributes(attr)
+                        new_layer.updateFields()
+                        new_layer_data.addFeatures(newFeatures)
+                        QgsVectorFileWriter.writeAsVectorFormat(new_layer, filepath[:-4] + "_NEW" + ".shp","utf-8", large.crs() ,"ESRI Shapefile")
+
+    def exportOrSaveStyle(self):
+        #Getting recentpaths
+        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
+            content = f.readlines()
+        content = [x.strip() for x in content]
+        self.dlg6.textEdit.clear()
+        self.dlg6.textEdit.addItems(content[12:15])
+        # show the dialog
+        self.dlg6.show()
+        # Run the dialog event loop
+        result = self.dlg6.exec_()
+        # See if OK was pressed
+        if result:
+            #Update combobox of recent paths by adding the new one
+            folderpath = self.dlg6.textEdit.currentText()
+            if folderpath not in content[12:15]:
+                content[14] = content[13]
+                content[13] = content[12]
+                content[12] = folderpath
+                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
+                for line in content:
+                    output_file.write(line+"\n")
+                output_file.close()
+            if self.dlg6.choice_save.isChecked():
+                #Save styles in chosen folder
+                for layer in self.iface.legendInterface().layers():
+                    layer.saveNamedStyle(folderpath + "\\" + layer.name() + ".qml")
+            else:
+                #Import styles from chosen folder
+                for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                    if file[-4:] == ".qml":
+                        for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[0:-4]):
+                            layer.loadNamedStyle(folderpath + "\\" + file)
+                self.iface.mapCanvas().refreshAllLayers()
+
+    #to text
     def exportPolygons(self):
         #Getting recentpaths
         with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
@@ -241,16 +346,23 @@ class mops:
                     output_file.write("CatchID, Sqn, X, Y\n")
                     for feature in layer.getFeatures():
                         id = feature.attributes()[0]
-                        polygon = feature.geometry().asPolygon()
                         i = 1
+                        geo = feature.geometry()
                         #The first item of polygon is the polyline of the outer ring
-                        if polygon:
-                            for point in polygon[0]:
-                                output_file.write(id + "\t" + str(i) + "\t" + str(point.x()) + "\t" + str(point.y()) + "\n")
-                                i += 1
+                        if geo.isMultipart():
+                            multi_polygon = geo.asMultiPolygon()
+                            j = 1
+                            for polygon in geo.asMultiPolygon():
+                                for point in polygon[0]:
+                                    output_file.write(id + "&&" + str(j) + "\t" + str(i) + "\t" + str(point.x()) + "\t" + str(point.y()) + "\n")
+                                    i += 1
+                                j+=1
                         else:
-                            #This feature has no geometry
-                            print(id)
+                            polygon = geo.asPolygon()
+                            for point in polygon[0]:
+                                output_file.write(id + "&&1" + "\t" + str(i) + "\t" + str(point.x()) + "\t" + str(point.y()) + "\n")
+                                i += 1
+
                     output_file.close()
 
 
@@ -489,13 +601,20 @@ class mops:
                         if v  in int_list:
                             newFeatures.append(dict_feat_a[k])
 
-                    small = QgsVectorLayer("Polygon?crs=epsg:4326&field=MopsID:string(40)", large.name(), "memory")
+                    small = QgsVectorLayer("Polygon?crs=epsg:4326&field=MopsID:string(40)", large.name()+"_SMALL", "memory")
                     pr = small.dataProvider()
                     pr.addFeatures(newFeatures)
                     small.updateExtents()
                     #Load in the "small polygon layer" in the bottom of the layer table
                     QgsMapLayerRegistry.instance().addMapLayer(small, False)
                     QgsProject.instance().layerTreeRoot().addLayer(small)
+            #Setting styles if there
+            folderpath = folderpath + "\\Style\\"
+            for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                if file[-4:] == ".qml":
+                    for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[0:-4]):
+                        layer.loadNamedStyle(folderpath+file)
+            self.iface.mapCanvas().refreshAllLayers()
 
     #For importing
     def points(self,input):
@@ -521,7 +640,13 @@ class mops:
             y = float(lineList.pop())
             x = float(lineList.pop())
             fet.setGeometry(QgsGeometry.fromPoint(QgsPoint(x, y)))
-            fet.setAttributes(lineList)
+            #Changing "NULL" to None
+            lineList2 = []
+            for item in lineList:
+                if item == "NULL":
+                    item = None
+                lineList2.append(item)
+            fet.setAttributes(lineList2)
             pr.addFeatures( [ fet ] )
             vl.updateExtents()
         QgsMapLayerRegistry.instance().addMapLayer(vl)
@@ -582,7 +707,13 @@ class mops:
                 geoList.append(QgsPoint(float(xy[0]),float(xy[1])))
             fet = QgsFeature()
             fet.setGeometry(QgsGeometry.fromPolyline(geoList))
-            fet.setAttributes(lineArray)
+            #Changing "NULL" to None
+            lineArray2 = []
+            for item in lineArray:
+                if item == "NULL":
+                    item = None
+                lineArray2.append(item)
+            fet.setAttributes(lineArray2)
             pr.addFeatures( [ fet ] )
             vl.updateExtents()
         vl.committedAttributeValuesChanges.connect(self.moveLinesToNewNodes)
@@ -676,10 +807,6 @@ class mops:
     def select_output_file(self):
         filename = QFileDialog.getSaveFileName(self.dlg2, "Select output file ","", '*.txt')
         self.dlg2.textEdit.lineEdit().setText(filename)
-
-    """def select_input_file(self):
-        filename = QFileDialog.getOpenFileName(self.dlg, "Select input file ","", '*.txt')
-        self.dlg.textEdit.setText(filename)"""
     
     def select_input_folder(self):
         foldername = QFileDialog.getExistingDirectory(self.dlg, "Select input folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
@@ -692,6 +819,14 @@ class mops:
     def select_output_dlg4(self):
         foldername = QFileDialog.getExistingDirectory(self.dlg4, "Select output folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
         self.dlg4.textEdit.lineEdit().setText(foldername)
+
+    def select_output_dlg5(self):
+        filename = QFileDialog.getSaveFileName(self.dlg2, "Select larger layer ","", '*.shp')
+        self.dlg5.textEdit.lineEdit().setText(filename)
+
+    def select_output_dlg6(self):
+        foldername = QFileDialog.getExistingDirectory(self.dlg6, "Select output folder ", expanduser("~"), QFileDialog.DontUseNativeDialog)
+        self.dlg6.textEdit.lineEdit().setText(foldername)
 
     def createuri(self, attributes):
         uri = "";
