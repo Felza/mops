@@ -1,2 +1,2 @@
 # mops
-A plugin for QGIS to use with the program MOPS by LNH Water ApS
+A plugin for QGIS by LNH Water ApS
