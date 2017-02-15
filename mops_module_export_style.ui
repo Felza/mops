@@ -84,7 +84,7 @@
     <string>Save styles</string>
    </property>
    <property name="checked">
-    <bool>true</bool>
+    <bool>false</bool>
    </property>
   </widget>
   <widget class="QRadioButton" name="choice_import">
@@ -98,6 +98,9 @@
    </property>
    <property name="text">
     <string>Import styles</string>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
    </property>
   </widget>
   <widget class="QLabel" name="label_2">

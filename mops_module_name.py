@@ -21,9 +21,9 @@
  ***************************************************************************/
 """
 from PyQt4.QtCore import *
-#from qgis.core import QgsVectorLayer, QgsFeature, QgsGeometry, QgsPoint, QgsMapLayerRegistry, QgsVectorFileWriter
 from qgis.core import *
-from PyQt4.QtGui import QAction, QIcon, QFileDialog
+from qgis.core import NULL
+from PyQt4.QtGui import QAction, QIcon, QFileDialog, QMessageBox
 # Initialize Qt resources from file resources.py
 import resources
 # Import the code for the dialog
@@ -33,9 +33,12 @@ from mops_module_export_shapefiles import exportShapefilesDialog
 from mops_module_export_polygon_to_text import exportPolygonToTextDialog
 from mops_module_export_style import exportStyle
 from mops_module_export_polygonChanges import exportPolygonChanges
-from os.path import isfile, join, expanduser
+from mops_module_calculate_raster import calculateRaster
+from os.path import isfile, join, expanduser, isdir
 import os.path
 from os import listdir
+import codecs
+import traceback
 
 
 class mops:
@@ -145,17 +148,19 @@ class mops:
         """
         # Create the dialog (after translation) and keep reference
         self.dlg = importDialog()
-        self.dlg.pushButton.clicked.connect(self.select_input_folder)
+        self.dlg.pushButton.clicked.connect(lambda: self.select_input_folder(self.dlg))
         self.dlg2 = saveDialog()
-        self.dlg2.pushButton.clicked.connect(self.select_output_file)
+        self.dlg2.pushButton.clicked.connect(lambda: self.select_output_textfile(self.dlg2))
         self.dlg3 = exportShapefilesDialog()
-        self.dlg3.pushButton.clicked.connect(self.select_output_dlg3)
+        self.dlg3.pushButton.clicked.connect(lambda: self.select_output_folder(self.dlg3))
         self.dlg4 = exportPolygonToTextDialog()
-        self.dlg4.pushButton.clicked.connect(self.select_output_dlg4)
+        self.dlg4.pushButton.clicked.connect(lambda: self.select_output_folder(self.dlg4))
         self.dlg5 = exportPolygonChanges()
         self.dlg5.pushButton.clicked.connect(self.select_output_dlg5)
         self.dlg6 = exportStyle()
-        self.dlg6.pushButton.clicked.connect(self.select_output_dlg6)
+        self.dlg6.pushButton.clicked.connect(lambda: self.select_output_folder(self.dlg6))
+        self.dlg7 = calculateRaster()
+        self.dlg7.pushButton.clicked.connect(lambda: self.select_output_folder(self.dlg7))
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
@@ -219,6 +224,13 @@ class mops:
             callback=self.exportOrSaveStyle,
             parent=self.iface.mainWindow())
 
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Calculate raster'),
+            callback=self.calculateRaster,
+            parent=self.iface.mainWindow())
+        
+
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
@@ -229,13 +241,111 @@ class mops:
         # remove the toolbar
         del self.toolbar
 
+    def calculateRaster(self):
+        #Getting recentpaths
+        recentPaths = self.getRecentPaths(self.dlg7,18,21)
+        # show the dialog
+        self.dlg7.show()
+        # Run the dialog event loop
+        result = self.dlg7.exec_()
+        # See if OK was pressed
+        if result:
+            #Update combobox of recent paths by adding the new one
+            folderpath = self.dlg7.textEdit.currentText()
+            self.updateRecentPaths(folderpath,18,21,recentPaths)
+            #Get the dtm
+            try:
+                dtm_header = []
+                h = 6
+                dtm_data = []
+                with open(folderpath + "\\dtm.txt") as fp:
+                    for line in fp:
+                        if h>0:
+                            dtm_header.append(line)
+                            h-=1
+                        else:
+                            dtm_data.append(line)
+                dtm_data_lists = []
+                for line in dtm_data:
+                    list = []
+                    for number in line.rstrip('\n').rstrip().split(" "):
+                        list.append(number)
+                    dtm_data_lists.append(list)
+                #Get the hole data
+                hole_header = []
+                h = 6
+                hole_data = []
+                with open(folderpath + "\\hole.txt") as fp:
+                    for line in fp:
+                        if h>0:
+                            hole_header.append(line)
+                            h-=1
+                        else:
+                            hole_data.append(line)
+                hole_data_lists = []
+                for line in hole_data:
+                    list = []
+                    for number in line.rstrip('\n').rstrip().split(" "):
+                        list.append(number)
+                    hole_data_lists.append(list)
+                #Get the hmax for hole
+                hmax_header = []
+                h = 1
+                hmax_data = []
+                with open(folderpath + "\\hmax_hole.txt") as fp:
+                    for line in fp:
+                        if h>0:
+                            hmax_header.append(line)
+                            h-=1
+                        else:
+                            hmax_data.append(line)
+                #The no_data needs to be replaced by 0 and all MUIDs be replaced by a value
+                replace = [hole_header[-1].rstrip('\n').split(" ")[-1]]
+                replaceWith = ["0"]
+                for line in hmax_data:
+                    list = line.rstrip('\n').split("\t")
+                    replace.append(list[0])
+                    replaceWith.append(list[1])
+                #Replace numbers in hole
+                for i1, list in enumerate(hole_data_lists):
+                    for i2, num in enumerate(list):
+                        for i3, num2 in enumerate(replace):
+                            if num == num2:
+                                list[i2] = replaceWith[i3]
+                                break
+                no_data = replace[0]
+                #Calculate
+                for idx, list in enumerate(dtm_data_lists):
+                    currentHoleList = hole_data_lists[idx]
+                    for i, num in enumerate(list):
+                        num2 = float(currentHoleList[i])
+                        num1 = float(num)
+                        num1 = num1 - num2
+                        if num1 < 0:
+                            list[i] = no_data
+                        else: 
+                            list[i] = str(num1)
+                #Print the result to a new textfile
+                listOfLines = []
+                for list in dtm_data_lists:
+                    listOfLines.append(" ".join(list))
+                lineToWrite = ""
+                for line in dtm_header:
+                    lineToWrite += line
+                lineToWrite += "\n".join(listOfLines)
+                output_file = open(folderpath + "\\raster_result.txt", 'w')
+                output_file.write(lineToWrite)
+                output_file.close()
+                layer = QgsRasterLayer(folderpath + "\\raster_result.txt", "Raster result")
+                QgsMapLayerRegistry.instance().addMapLayer(layer)
+            except (WindowsError, IOError):
+                QMessageBox.about(self.dlg,"Error","The filepath could not be found")
+            except:
+                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
+
     def savePolygonChanges(self):
         #Getting recentpaths
-        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
-            content = f.readlines()
-        content = [x.strip() for x in content]
-        self.dlg5.textEdit.clear()
-        self.dlg5.textEdit.addItems(content[15:18])
+        recentPaths = self.getRecentPaths(self.dlg5,15,18)
         # show the dialog
         self.dlg5.show()
         # Run the dialog event loop
@@ -244,49 +354,40 @@ class mops:
         if result:
             #Update combobox of recent paths by adding the new one
             filepath = self.dlg5.textEdit.currentText()
-            if filepath not in content[15:18]:
-                content[17] = content[16]
-                content[16] = content[15]
-                content[15] = filepath
-                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
-                for line in content:
-                    output_file.write(line+"\n")
-                output_file.close()
+            self.updateRecentPaths(filepath,15,18,recentPaths)
             #Do stuff
-            for small in self.iface.legendInterface().layers():
-                if small.wkbType()==3:
-                    if small.name()[-5:] == "SMALL":
-                        large = QgsVectorLayer(filepath, "namedoesnotmatter", "ogr")
-                        dict_small = {}
-                        dict_large = {}
-                        listOfIds = []
-                        for f in large.getFeatures():
-                            dict_large[f['MopsID']] = f
-                            listOfIds.append(f.id())
-                        for feat in small.getFeatures():
-                            dict_small[feat['MopsID']] = feat
-                        small_IDlist = dict_small.keys()
-                        newFeatures = []
-                        for k, v in dict_large.iteritems():
-                            if k in small_IDlist:
-                                newFeatures.append(dict_small[k])
-                            else:
-                                newFeatures.append(v)
-                        new_layer = QgsVectorLayer("Polygon?crs=epsg:4326", "duplicated_layer", "memory")
-                        new_layer_data = new_layer.dataProvider()
-                        attr = large.dataProvider().fields().toList()
-                        new_layer_data.addAttributes(attr)
-                        new_layer.updateFields()
-                        new_layer_data.addFeatures(newFeatures)
-                        QgsVectorFileWriter.writeAsVectorFormat(new_layer, filepath[:-4] + "_NEW" + ".shp","utf-8", large.crs() ,"ESRI Shapefile")
+            try:
+                for small in self.iface.legendInterface().layers():
+                    if small.wkbType()==3:
+                        if small.name()[-5:] == "SMALL":
+                            large = QgsVectorLayer(filepath, "namedoesnotmatter", "ogr")
+                            text_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\temp\\temp.txt", "r")
+                            smallUnmodifiedMopsIDs = text_file.read().split('\n')[:-1]
+                            text_file.close()
+                            dict_large = {}
+                            for f in large.getFeatures():
+                                dict_large[f['MopsID']] = f
+                            newFeatures = []
+                            for k, v in dict_large.iteritems():
+                                if k not in smallUnmodifiedMopsIDs:
+                                    newFeatures.append(v)
+                            newFeatures.extend(small.getFeatures())
+                            new_layer = QgsVectorLayer("Polygon?crs=epsg:3044", "duplicated_layer", "memory")
+                            new_layer_data = new_layer.dataProvider()
+                            attr = large.dataProvider().fields().toList()
+                            new_layer_data.addAttributes(attr)
+                            new_layer.updateFields()
+                            new_layer_data.addFeatures(newFeatures)
+
+                            QgsVectorFileWriter.writeAsVectorFormat(new_layer, filepath[:-4] + "_NEW" + ".shp","utf-8", large.crs() ,"ESRI Shapefile")
+            except (WindowsError, IOError):
+                QMessageBox.about(self.dlg,"Error","The folder could not be found")
+            except:
+                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
 
     def exportOrSaveStyle(self):
         #Getting recentpaths
-        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
-            content = f.readlines()
-        content = [x.strip() for x in content]
-        self.dlg6.textEdit.clear()
-        self.dlg6.textEdit.addItems(content[12:15])
+        recentPaths = self.getRecentPaths(self.dlg6,12,15)
         # show the dialog
         self.dlg6.show()
         # Run the dialog event loop
@@ -295,34 +396,30 @@ class mops:
         if result:
             #Update combobox of recent paths by adding the new one
             folderpath = self.dlg6.textEdit.currentText()
-            if folderpath not in content[12:15]:
-                content[14] = content[13]
-                content[13] = content[12]
-                content[12] = folderpath
-                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
-                for line in content:
-                    output_file.write(line+"\n")
-                output_file.close()
-            if self.dlg6.choice_save.isChecked():
-                #Save styles in chosen folder
-                for layer in self.iface.legendInterface().layers():
-                    layer.saveNamedStyle(folderpath + "\\" + layer.name() + ".qml")
-            else:
-                #Import styles from chosen folder
-                for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
-                    if file[-4:] == ".qml":
-                        for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[0:-4]):
-                            layer.loadNamedStyle(folderpath + "\\" + file)
-                self.iface.mapCanvas().refreshAllLayers()
+            self.updateRecentPaths(folderpath,12,15,recentPaths)
+            #Do the work
+            try:
+                if self.dlg6.choice_save.isChecked():
+                    #Save styles in chosen folder
+                    for layer in self.iface.legendInterface().layers():
+                        layer.saveNamedStyle(folderpath + "\\" + layer.name() + ".qml")
+                else:
+                    #Import styles from chosen folder
+                    for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                        if file[-4:] == ".qml":
+                            for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[:-4]):
+                                layer.loadNamedStyle(folderpath + "\\" + file)
+                    self.iface.mapCanvas().refreshAllLayers()
+            except (WindowsError, IOError):
+                QMessageBox.about(self.dlg,"Error","The folder could not be found")
+            except:
+                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
 
-    #to text
+
+    #to textfile
     def exportPolygons(self):
         #Getting recentpaths
-        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
-            content = f.readlines()
-        content = [x.strip() for x in content]
-        self.dlg4.textEdit.clear()
-        self.dlg4.textEdit.addItems(content[6:9])
+        recentPaths = self.getRecentPaths(self.dlg4,6,9)
         # show the dialog
         self.dlg4.show()
         # Run the dialog event loop
@@ -331,48 +428,42 @@ class mops:
         if result:
             #Update combobox of recent paths by adding the new one
             folderpath = self.dlg4.textEdit.currentText()
-            if folderpath not in content[6:9]:
-                content[8] = content[7]
-                content[7] = content[6]
-                content[6] = folderpath
-                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
-                for line in content:
-                    output_file.write(line+"\n")
-                output_file.close()
-            layers = self.iface.legendInterface().layers()
-            for layer in layers:
-                if layer.wkbType()==3:
-                    output_file = open(folderpath + "\\" + layer.name() + ".txt", 'w')
-                    output_file.write("CatchID, Sqn, X, Y\n")
-                    for feature in layer.getFeatures():
-                        id = feature.attributes()[0]
-                        i = 1
-                        geo = feature.geometry()
-                        #The first item of polygon is the polyline of the outer ring
-                        if geo.isMultipart():
-                            multi_polygon = geo.asMultiPolygon()
-                            j = 1
-                            for polygon in geo.asMultiPolygon():
+            self.updateRecentPaths(folderpath,6,9,recentPaths)
+            #Do the work
+            try:
+                layers = self.iface.legendInterface().layers()
+                for layer in layers:
+                    if layer.wkbType()==3:
+                        output_file = codecs.open(folderpath + "\\" + layer.name() + ".txt", 'w',encoding='utf-8')
+                        output_file.write("CatchID, Sqn, X, Y\n")
+                        for feature in layer.getFeatures():
+                            id = feature.attributes()[0]
+                            i = 1
+                            geo = feature.geometry()
+                            #The first item of polygon is the polyline of the outer ring
+                            if geo.isMultipart():
+                                multi_polygon = geo.asMultiPolygon()
+                                j = 1
+                                for polygon in geo.asMultiPolygon():
+                                    for point in polygon[0]:
+                                        output_file.write(id + "&&" + str(j) + "\t" + str(i) + "\t" + str(point.x()) + "\t" + str(point.y()) + "\n")
+                                        i += 1
+                                    j+=1
+                            else:
+                                polygon = geo.asPolygon()
                                 for point in polygon[0]:
-                                    output_file.write(id + "&&" + str(j) + "\t" + str(i) + "\t" + str(point.x()) + "\t" + str(point.y()) + "\n")
+                                    output_file.write(id + "&&1" + "\t" + str(i) + "\t" + str(point.x()) + "\t" + str(point.y()) + "\n")
                                     i += 1
-                                j+=1
-                        else:
-                            polygon = geo.asPolygon()
-                            for point in polygon[0]:
-                                output_file.write(id + "&&1" + "\t" + str(i) + "\t" + str(point.x()) + "\t" + str(point.y()) + "\n")
-                                i += 1
 
-                    output_file.close()
-
+                        output_file.close()
+            except (WindowsError, IOError):
+                QMessageBox.about(self.dlg,"Error","The folder could not be found")
+            except:
+                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
 
     def exportShapefiles(self):
         #Getting recentpaths
-        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
-            content = f.readlines()
-        content = [x.strip() for x in content]
-        self.dlg3.textEdit.clear()
-        self.dlg3.textEdit.addItems(content[3:6])
+        recentPaths = self.getRecentPaths(self.dlg3,3,6)
         # show the dialog
         self.dlg3.show()
         # Run the dialog event loop
@@ -381,20 +472,18 @@ class mops:
         if result:
             #Update combobox of recent paths by adding the new one
             folderpath = self.dlg3.textEdit.currentText()
-            if folderpath not in content[3:6]:
-                content[5] = content[4]
-                content[4] = content[3]
-                content[3] = folderpath
-                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
-                for line in content:
-                    output_file.write(line+"\n")
-                output_file.close()
-            #Save layers as shapefiles
-            layers = self.iface.legendInterface().layers()
-            for layer in layers:
-                QgsVectorFileWriter.writeAsVectorFormat(layer,
-                    folderpath + "\\" + layer.name() + ".shp","utf-8", layer.crs() ,"ESRI Shapefile")
-
+            self.updateRecentPaths(folderpath,3,6,recentPaths)
+            try:
+                #Save layers as shapefiles
+                layers = self.iface.legendInterface().selectedLayers()
+                for layer in layers:
+                    if type(layer) is QgsVectorLayer:
+                        QgsVectorFileWriter.writeAsVectorFormat(layer,
+                            folderpath + "\\" + layer.name() + ".shp","utf-8", layer.crs() ,"ESRI Shapefile")
+            except (WindowsError, IOError):
+                QMessageBox.about(self.dlg,"Error","The folder could not be found")
+            except:
+                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
 
     def moveLines(self, layerId, geoMap):
         pointLayer = QgsMapLayerRegistry.instance().mapLayer(layerId)
@@ -535,86 +624,88 @@ class mops:
                             geoMap[featureId] = QgsGeometry.fromPolyline(points)
                             pr.changeGeometryValues(geoMap)
         lineLayer.updateExtents()
-            
 
     def importdlg(self):
         #Getting recentpaths
-        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
-            content = f.readlines()
-        content = [x.strip() for x in content]
-        self.dlg.textEdit.clear()
-        self.dlg.textEdit.addItems(content[0:3])
+        recentPaths = self.getRecentPaths(self.dlg,0,3)
         # show the dialog
         self.dlg.show()
         # Run the dialog event loop
         result = self.dlg.exec_()
         # See if OK was pressed
         if result:
-            #Update combobox of recent paths by adding the new one
             folderpath = self.dlg.textEdit.currentText()
-            if folderpath not in content[0:3]:
-                content[2] = content[1]
-                content[1] = content[0]
-                content[0] = folderpath
-                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
-                for line in content:
-                    output_file.write(line+"\n")
-                output_file.close()
+            #Update combobox of recent paths by adding the new one
+            self.updateRecentPaths(folderpath,0,3,recentPaths)
             #Go through all files in the folder and find the text file
             #Add the points
-            for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
-                if file[-4:] == ".txt":
-                    input = open(folderpath + "\\" + file, 'r')
-                    inputline = input.readline()
-                    while (inputline != "ENDOFFILE"):
-                        if inputline == "POINT\n":
-                            self.points(input)
+            try:
+                for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                    if file[-4:] == ".txt":
+                        input = open(folderpath + "\\" + file, 'r')
                         inputline = input.readline()
-            #Go through all files in the folder and find the text file
-            #Add the lines
-            #This is done after, because the lines will need the points for field configuration
-            for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
-                if file[-4:] == ".txt":
-                    input = open(folderpath + "\\" + file, 'r')
-                    inputline = input.readline()
-                    while (inputline != "ENDOFFILE"):
-                        if inputline == "LINES\n":
-                            self.lines(input)
+                        while (inputline != "ENDOFFILE"):
+                            if inputline == "POINTS\n":
+                                self.points(input)
+                            inputline = input.readline()
+                        input.close()
+                #Go through all files in the folder and find the text file
+                #Add the lines
+                #This is done after, because the lines will need the points for field configuration
+                for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                    if file[-4:] == ".txt":
+                        input = open(folderpath + "\\" + file, 'r')
                         inputline = input.readline()
-            #Get the polygon layer by a shapefile and create new "small polygon layer"
-            for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
-                if file[-4:] == ".shp":
-                    large = QgsVectorLayer(folderpath + "\\" + file, file[:-4], "ogr")
-                    dict_a = {}
-                    dict_feat_a = {}
-                    for feat in large.getFeatures():
-                        dict_a[feat.id()] = feat['MopsID']
-                        dict_feat_a[feat.id()] = feat
-                    catchLayer = QgsMapLayerRegistry.instance().mapLayersByName("Catchment")[0]
-                    dict_b = {}
-                    for ft in catchLayer.getFeatures():
-                        dict_b[ft.id()] = ft['CatchMUID']
-                    int_list = list(set(dict_a.values()) & set(dict_b.values()))
-                    newFeatures = []
+                        while (inputline != "ENDOFFILE"):
+                            if inputline == "LINES\n":
+                                self.lines(input)
+                            inputline = input.readline()
+                        input.close()
+                #Get the polygon layer by a shapefile and create new "small polygon layer"
+                for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                    if file[-4:] == ".shp":
+                        large = QgsVectorLayer(folderpath + "\\" + file, file[:-4], "ogr")
+                        dict_a = {}
+                        dict_feat_a = {}
+                        for feat in large.getFeatures():
+                            dict_a[feat.id()] = feat['MopsID']
+                            dict_feat_a[feat.id()] = feat
+                        catchLayer = QgsMapLayerRegistry.instance().mapLayersByName("Catchment")[0]
+                        dict_b = {}
+                        for ft in catchLayer.getFeatures():
+                            dict_b[ft.id()] = ft['CatchMUID']
+                        int_list = list(set(dict_a.values()) & set(dict_b.values()))
+                        newFeatures = []
 
-                    for k, v in dict_a.iteritems():
-                        if v  in int_list:
-                            newFeatures.append(dict_feat_a[k])
+                        for k, v in dict_a.iteritems():
+                            if v  in int_list:
+                                newFeatures.append(dict_feat_a[k])
 
-                    small = QgsVectorLayer("Polygon?crs=epsg:4326&field=MopsID:string(40)", large.name()+"_SMALL", "memory")
-                    pr = small.dataProvider()
-                    pr.addFeatures(newFeatures)
-                    small.updateExtents()
-                    #Load in the "small polygon layer" in the bottom of the layer table
-                    QgsMapLayerRegistry.instance().addMapLayer(small, False)
-                    QgsProject.instance().layerTreeRoot().addLayer(small)
-            #Setting styles if there
-            folderpath = folderpath + "\\Style\\"
-            for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
-                if file[-4:] == ".qml":
-                    for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[0:-4]):
-                        layer.loadNamedStyle(folderpath+file)
-            self.iface.mapCanvas().refreshAllLayers()
+                        small = QgsVectorLayer("Polygon?crs=epsg:3044&field=MopsID:string(40)", large.name()+"_SMALL", "memory")
+                        pr = small.dataProvider()
+                        pr.addFeatures(newFeatures)
+                        small.updateExtents()
+                        #Load in the "small polygon layer" in the bottom of the layer table
+                        QgsMapLayerRegistry.instance().addMapLayer(small, False)
+                        QgsProject.instance().layerTreeRoot().addLayer(small)
+                        #Save MopsIDs of the small polygon layer, this for later use if the user chooses to save changes made in the polygon layer
+                        aFile = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\temp\\temp.txt",'w')
+                        for k, v in dict_b.iteritems():
+                            aFile.write("%s\n" %v)
+                        aFile.close()
+                        #QgsVectorFileWriter.writeAsVectorFormat(small, expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\temp\\temp.shp","utf-8", large.crs() ,"ESRI Shapefile")
+                #Setting styles if there
+                folderpath = folderpath + "\\Style\\"
+                if isdir(folderpath):
+                    for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                        if file[-4:] == ".qml":
+                            for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[0:-4]):
+                                layer.loadNamedStyle(folderpath+file)
+                self.iface.mapCanvas().refreshAllLayers()
+            except (WindowsError, IOError):
+                QMessageBox.about(self.dlg,"Error","The folder could not be found")
+            except:
+                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
 
     #For importing
     def points(self,input):
@@ -622,7 +713,7 @@ class mops:
         #Set the attribute names and types
         attributes = input.readline().rstrip('\n').split(";;")
         del attributes[-2:]
-        uri = "Point?crs=epsg:4326" + self.createuri(attributes)
+        uri = "Point?crs=epsg:3044" + self.createuri(attributes)
         vl = QgsVectorLayer(uri, name, "memory")
         vl.committedGeometriesChanges.connect(self.moveLines)
         pr = vl.dataProvider()
@@ -640,11 +731,11 @@ class mops:
             y = float(lineList.pop())
             x = float(lineList.pop())
             fet.setGeometry(QgsGeometry.fromPoint(QgsPoint(x, y)))
-            #Changing "NULL" to None
+            #Changing "NULL" to QGIS.Null
             lineList2 = []
             for item in lineList:
                 if item == "NULL":
-                    item = None
+                    item = NULL
                 lineList2.append(item)
             fet.setAttributes(lineList2)
             pr.addFeatures( [ fet ] )
@@ -657,7 +748,7 @@ class mops:
         #Set the attribute names and types
         attributes = input.readline().rstrip('\n').split(";;")
         del attributes[-1:]
-        uri = "LineString?crs=epsg:4326" + self.createuri(attributes)
+        uri = "LineString?crs=epsg:3044" + self.createuri(attributes)
         vl = QgsVectorLayer(uri, name, "memory")
         ############## creating ValueMaps for all kind of from- and tonodes, so only relevant points can be chosen
         nodeLayer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
@@ -707,11 +798,11 @@ class mops:
                 geoList.append(QgsPoint(float(xy[0]),float(xy[1])))
             fet = QgsFeature()
             fet.setGeometry(QgsGeometry.fromPolyline(geoList))
-            #Changing "NULL" to None
+            #Changing "NULL" to NULL
             lineArray2 = []
             for item in lineArray:
                 if item == "NULL":
-                    item = None
+                    item = NULL
                 lineArray2.append(item)
             fet.setAttributes(lineArray2)
             pr.addFeatures( [ fet ] )
@@ -721,11 +812,7 @@ class mops:
 
     def exportdlg(self):
         #Getting recentpaths
-        with open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt") as f:
-            content = f.readlines()
-        content = [x.strip() for x in content]
-        self.dlg2.textEdit.clear()
-        self.dlg2.textEdit.addItems(content[9:12])
+        recentPaths = self.getRecentPaths(self.dlg2,9,12)
         # show the dialog
         self.dlg2.show()
         # Run the dialog event loop
@@ -734,27 +821,27 @@ class mops:
         if result:
             #Update combobox of recent paths by adding the new one
             filepath = self.dlg2.textEdit.currentText()
-            if filepath not in content[9:12]:
-                content[11] = content[10]
-                content[10] = content[9]
-                content[9] = filepath
-                output_file = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w')
-                for line in content:
-                    output_file.write(line+"\n")
+            self.updateRecentPaths(filepath,9,12,recentPaths)
+            #Do the work
+            try:
+                output_file = codecs.open(filepath, 'w',encoding='utf-8')
+                layers = self.iface.legendInterface().layers()
+                for layer in layers:
+                    if type(layer) is QgsVectorLayer:
+                        if layer.wkbType()==1:
+                            self.writePoint(layer,output_file)
+                        if layer.wkbType()==2:
+                            self.writeLine(layer,output_file)
+                output_file.write("ENDOFFILE")
                 output_file.close()
-            output_file = open(filepath, 'w')
-            layers = self.iface.legendInterface().layers()
-            for layer in layers:
-                if layer.wkbType()==1:
-                    self.writePoint(layer,output_file)
-                if layer.wkbType()==2:
-                    self.writeLine(layer,output_file)
-            output_file.write("ENDOFFILE")
-            output_file.close()
+            except (WindowsError):
+                QMessageBox.about(self.dlg,"Error","The filepath could not be found")
+            except:
+                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
 
     def writePoint(self,layer,output_file):
         #print type and name
-        output_file.write("POINT\n")
+        output_file.write("POINTS\n")
         output_file.write(layer.name() + '\n')
         #print heading of features
         fields = layer.pendingFields()
@@ -773,8 +860,7 @@ class mops:
             line = ';;'.join(unicode(f[x]) for x in fieldnames)
             geom = f.geometry()
             line += ";;" + str(geom.asPoint().x()) + ";;" + str(geom.asPoint().y()) + "\n"
-            unicode_line = line.encode('utf-8')
-            output_file.write(unicode_line)
+            output_file.write(line)
         output_file.write("ENDOFPOINTS\n")
         
     def writeLine(self,layer,output_file):
@@ -800,33 +886,25 @@ class mops:
             for point in geom.asPolyline():
                 line += str(point.x()) + ".." + str(point.y()) + "::"
             line = line[:-2] + "\n"
-            unicode_line = line.encode('utf-8')
-            output_file.write(unicode_line)
+            output_file.write(line)
         output_file.write("ENDOFLINES\n")
 
-    def select_output_file(self):
-        filename = QFileDialog.getSaveFileName(self.dlg2, "Select output file ","", '*.txt')
-        self.dlg2.textEdit.lineEdit().setText(filename)
     
-    def select_input_folder(self):
-        foldername = QFileDialog.getExistingDirectory(self.dlg, "Select input folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
-        self.dlg.textEdit.lineEdit().setText(foldername)
+    def select_input_folder(self, dialog):
+        foldername = QFileDialog.getExistingDirectory(dialog, "Select input folder ", dialog.textEdit.currentText(), QFileDialog.DontUseNativeDialog)
+        dialog.textEdit.lineEdit().setText(foldername)
     
-    def select_output_dlg3(self):
-        foldername = QFileDialog.getExistingDirectory(self.dlg3, "Select output folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
-        self.dlg3.textEdit.lineEdit().setText(foldername)
+    def select_output_textfile(self, dialog):
+        filename = QFileDialog.getSaveFileName(dialog, "Select output file ",dialog.textEdit.currentText(), '*.txt')
+        dialog.textEdit.lineEdit().setText(filename)
 
-    def select_output_dlg4(self):
-        foldername = QFileDialog.getExistingDirectory(self.dlg4, "Select output folder ", expanduser("~"), QFileDialog.ShowDirsOnly)
-        self.dlg4.textEdit.lineEdit().setText(foldername)
+    def select_output_folder(self, dialog):
+        foldername = QFileDialog.getExistingDirectory(dialog, "Select output folder ", dialog.textEdit.currentText(), QFileDialog.DontUseNativeDialog)
+        dialog.textEdit.lineEdit().setText(foldername)
 
     def select_output_dlg5(self):
-        filename = QFileDialog.getSaveFileName(self.dlg2, "Select larger layer ","", '*.shp')
+        filename = QFileDialog.getOpenFileName(self.dlg5, "Select larger layer ","", '*.shp')
         self.dlg5.textEdit.lineEdit().setText(filename)
-
-    def select_output_dlg6(self):
-        foldername = QFileDialog.getExistingDirectory(self.dlg6, "Select output folder ", expanduser("~"), QFileDialog.DontUseNativeDialog)
-        self.dlg6.textEdit.lineEdit().setText(foldername)
 
     def createuri(self, attributes):
         uri = "";
@@ -841,3 +919,21 @@ class mops:
                 uri = uri + "&field=" + attributeSplit[0] + ":double"
         return uri
 
+    def getRecentPaths(self,dialog,lowNum,highNum):
+        recentFile = codecs.open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'r', encoding='utf-8')
+        content = recentFile.readlines()
+        recentFile.close()
+        content = [x.strip() for x in content]
+        dialog.textEdit.clear()
+        dialog.textEdit.addItems(content[lowNum:highNum])
+        return content
+
+    def updateRecentPaths(self,folderpath,lowNum,HighNum,content):
+        if folderpath not in content[lowNum:HighNum]:
+            content[lowNum+2] = content[lowNum+1]
+            content[lowNum+1] = content[lowNum]
+            content[lowNum] = folderpath
+            output_file = codecs.open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w', encoding='utf-8')
+            for line in content:
+                output_file.write(line+"\n")
+            output_file.close()

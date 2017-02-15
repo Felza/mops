@@ -33,7 +33,7 @@
    <property name="geometry">
     <rect>
      <x>280</x>
-     <y>110</y>
+     <y>160</y>
      <width>91</width>
      <height>23</height>
     </rect>
@@ -46,13 +46,65 @@
    <property name="geometry">
     <rect>
      <x>30</x>
-     <y>110</y>
+     <y>160</y>
      <width>221</width>
      <height>31</height>
     </rect>
    </property>
    <property name="editable">
     <bool>true</bool>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>30</y>
+     <width>311</width>
+     <height>31</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Select the orignal shapefile of the _SMALL polygon layer.</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label_2">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>50</y>
+     <width>371</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>After pressing OK a new shapefile file will be generated in the same folder,</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label_3">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>50</y>
+     <width>361</width>
+     <height>41</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>containing the changes made in the _SMALL polygon layer.</string>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label_4">
+   <property name="geometry">
+    <rect>
+     <x>20</x>
+     <y>100</y>
+     <width>361</width>
+     <height>31</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>The original shapefile will not be overwritten.</string>
    </property>
   </widget>
  </widget>

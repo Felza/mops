@@ -32,14 +32,14 @@
   <widget class="QPushButton" name="pushButton">
    <property name="geometry">
     <rect>
-     <x>270</x>
+     <x>260</x>
      <y>110</y>
-     <width>91</width>
+     <width>121</width>
      <height>23</height>
     </rect>
    </property>
    <property name="text">
-    <string>Choose textfile</string>
+    <string>Choose textfile folder</string>
    </property>
   </widget>
   <widget class="QComboBox" name="textEdit">
