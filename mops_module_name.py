@@ -8,7 +8,7 @@
         begin                : 2016-10-22
         git sha              : $Format:%H$
         copyright            : (C) 2016 by LNH Water
-        email                : kontakt@lnhwater.dk
+        email                : kontakt at lnhwater dot dk
  ***************************************************************************/
 
 /***************************************************************************
@@ -23,7 +23,7 @@
 from PyQt4.QtCore import *
 from qgis.core import *
 from qgis.core import NULL
-from PyQt4.QtGui import QAction, QIcon, QFileDialog, QMessageBox
+from PyQt4.QtGui import QAction, QIcon, QFileDialog, QMessageBox, QProgressBar
 # Initialize Qt resources from file resources.py
 import resources
 # Import the code for the dialog
@@ -39,6 +39,7 @@ import os.path
 from os import listdir
 import codecs
 import traceback
+import glob
 
 
 class mops:
@@ -208,7 +209,7 @@ class mops:
 
         self.add_action(
             icon_path,
-            text=self.tr(u'Save all layers as Shapefiles'),
+            text=self.tr(u'Save selected layers as Shapefiles'),
             callback=self.exportShapefiles,
             parent=self.iface.mainWindow())
 
@@ -389,6 +390,7 @@ class mops:
         #Getting recentpaths
         recentPaths = self.getRecentPaths(self.dlg6,12,15)
         # show the dialog
+        self.dlg6.choice_import.click()
         self.dlg6.show()
         # Run the dialog event loop
         result = self.dlg6.exec_()
@@ -396,24 +398,30 @@ class mops:
         if result:
             #Update combobox of recent paths by adding the new one
             folderpath = self.dlg6.textEdit.currentText()
-            self.updateRecentPaths(folderpath,12,15,recentPaths)
-            #Do the work
-            try:
-                if self.dlg6.choice_save.isChecked():
-                    #Save styles in chosen folder
-                    for layer in self.iface.legendInterface().layers():
-                        layer.saveNamedStyle(folderpath + "\\" + layer.name() + ".qml")
-                else:
-                    #Import styles from chosen folder
-                    for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
-                        if file[-4:] == ".qml":
-                            for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[:-4]):
-                                layer.loadNamedStyle(folderpath + "\\" + file)
-                    self.iface.mapCanvas().refreshAllLayers()
-            except (WindowsError, IOError):
-                QMessageBox.about(self.dlg,"Error","The folder could not be found")
-            except:
-                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
+            fileCounter = len(glob.glob1(folderpath,"*.qml"))
+            reply = QMessageBox.Yes
+            if fileCounter > 0:
+                reply = QMessageBox.question(self.iface.mainWindow(), 'Warning', 
+                 'This folder already contain styles. Styles with identical names will be overwritten.\nAre you sure you want to continue?', QMessageBox.Yes, QMessageBox.No)
+            if reply == QMessageBox.Yes:
+                self.updateRecentPaths(folderpath,12,15,recentPaths)
+                #Do the work
+                try:
+                    if self.dlg6.choice_save.isChecked():
+                        #Save styles in chosen folder
+                        for layer in self.iface.legendInterface().layers():
+                            layer.saveNamedStyle(folderpath + "\\" + layer.name() + ".qml")
+                    else:
+                        #Import styles from chosen folder
+                        for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
+                            if file[-4:] == ".qml":
+                                for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[:-4]):
+                                    layer.loadNamedStyle(folderpath + "\\" + file)
+                        self.iface.mapCanvas().refreshAllLayers()
+                except (WindowsError, IOError):
+                    QMessageBox.about(self.dlg,"Error","The folder could not be found")
+                except:
+                    QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
 
 
     #to textfile
@@ -479,7 +487,7 @@ class mops:
                 for layer in layers:
                     if type(layer) is QgsVectorLayer:
                         QgsVectorFileWriter.writeAsVectorFormat(layer,
-                            folderpath + "\\" + layer.name() + ".shp","utf-8", layer.crs() ,"ESRI Shapefile")
+                            folderpath + "\\" + layer.name() + ".shp","ascii", layer.crs() ,"ESRI Shapefile")
             except (WindowsError, IOError):
                 QMessageBox.about(self.dlg,"Error","The folder could not be found")
             except:
@@ -487,8 +495,16 @@ class mops:
 
     def moveLines(self, layerId, geoMap):
         pointLayer = QgsMapLayerRegistry.instance().mapLayer(layerId)
+        pr = pointLayer.dataProvider()
+        changedPoints = {}
         for featureId, geo in geoMap.items():
             for feature in pointLayer.getFeatures(QgsFeatureRequest(featureId)):
+                #Update pointLayer attribute values for X and Y
+                changedAttributes = {}
+                changedAttributes[pointLayer.fieldNameIndex('X_POINT')] = float(geo.asPoint().x())
+                changedAttributes[pointLayer.fieldNameIndex('Y_POINT')] = float(geo.asPoint().y())
+                changedPoints[featureId] = changedAttributes
+                #Get and snap all relevant lines
                 layers = self.iface.legendInterface().layers()
                 for lineLayer in layers:
                     if lineLayer.wkbType()==2:
@@ -544,7 +560,8 @@ class mops:
                                     points.append(feature.geometry().asPoint())
                                     lineLayer.changeGeometry(lineFeature.id(),QgsGeometry.fromPolyline(points))
                         lineLayer.commitChanges()
-
+        pr.changeAttributeValues(changedPoints)
+        self.iface.mapCanvas().refreshAllLayers()
 
     def moveLinesToNewNodes(self, layerId, changedAttributesMap):
         lineLayer = QgsMapLayerRegistry.instance().mapLayer(layerId)
@@ -637,33 +654,58 @@ class mops:
             folderpath = self.dlg.textEdit.currentText()
             #Update combobox of recent paths by adding the new one
             self.updateRecentPaths(folderpath,0,3,recentPaths)
+
+            #Adding progress bar
+            self.iface.messageBar().clearWidgets()
+            progressMessageBar = self.iface.messageBar()
+            progress = QProgressBar()
+            progress.setMaximum(100) 
+            progress.setTextVisible(True)
+            progressMessageBar.pushWidget(progress)
+
+            #Adding a layer group
+            group = QgsProject.instance().layerTreeRoot().addGroup(os.path.basename(os.path.normpath(folderpath)))
+            errorList = ""
             #Go through all files in the folder and find the text file
-            #Add the points
             try:
+                #Add the points
+                j = 0
+                progress.setFormat("Loading nodes..")
                 for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
                     if file[-4:] == ".txt":
                         input = open(folderpath + "\\" + file, 'r')
                         inputline = input.readline()
+                        i=1
                         while (inputline != "ENDOFFILE"):
                             if inputline == "POINTS\n":
-                                self.points(input)
+                                errorList = self.points(input, group, errorList)
+                                progress.setValue(100/3/3*i)
+                                i+=1
+                            elif inputline == "LINES\n":
+                                j+=1
                             inputline = input.readline()
                         input.close()
                 #Go through all files in the folder and find the text file
                 #Add the lines
                 #This is done after, because the lines will need the points for field configuration
+                progress.setFormat("Loading links..")
                 for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
                     if file[-4:] == ".txt":
                         input = open(folderpath + "\\" + file, 'r')
                         inputline = input.readline()
+                        i=1
                         while (inputline != "ENDOFFILE"):
                             if inputline == "LINES\n":
-                                self.lines(input)
+                                errorList = self.lines(input, group,errorList)
+                                progress.setValue(100/3+100/3/j*i)
+                                i+=1
                             inputline = input.readline()
                         input.close()
                 #Get the polygon layer by a shapefile and create new "small polygon layer"
                 for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
                     if file[-4:] == ".shp":
+                        progress.setFormat("Loading polygons..")
+                        progress.setValue(80)
                         large = QgsVectorLayer(folderpath + "\\" + file, file[:-4], "ogr")
                         dict_a = {}
                         dict_feat_a = {}
@@ -680,7 +722,6 @@ class mops:
                         for k, v in dict_a.iteritems():
                             if v  in int_list:
                                 newFeatures.append(dict_feat_a[k])
-
                         small = QgsVectorLayer("Polygon?crs=epsg:3044&field=MopsID:string(40)", large.name()+"_SMALL", "memory")
                         pr = small.dataProvider()
                         pr.addFeatures(newFeatures)
@@ -688,34 +729,57 @@ class mops:
                         #Load in the "small polygon layer" in the bottom of the layer table
                         QgsMapLayerRegistry.instance().addMapLayer(small, False)
                         QgsProject.instance().layerTreeRoot().addLayer(small)
-                        #Save MopsIDs of the small polygon layer, this for later use if the user chooses to save changes made in the polygon layer
+                        #Save MopsIDs of the small polygon layer, this is for later use if the user chooses to save changes made in the polygon layer
                         aFile = open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\temp\\temp.txt",'w')
                         for k, v in dict_b.iteritems():
                             aFile.write("%s\n" %v)
                         aFile.close()
-                        #QgsVectorFileWriter.writeAsVectorFormat(small, expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\temp\\temp.shp","utf-8", large.crs() ,"ESRI Shapefile")
                 #Setting styles if there
                 folderpath = folderpath + "\\Style\\"
                 if isdir(folderpath):
+                    progress.setFormat("Applying styles..")
+                    progress.setValue(90)
                     for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
                         if file[-4:] == ".qml":
                             for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[0:-4]):
                                 layer.loadNamedStyle(folderpath+file)
+                #If there's no style folder, use default style
+                else:
+                    stylepath = expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\DefaultStyles\\"
+                    progress.setFormat("Applying styles..")
+                    progress.setValue(90)
+                    for file in [f for f in listdir(stylepath) if isfile(join(stylepath, f))]:
+                        if file[-4:] == ".qml":
+                            for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[0:-4]):
+                                layer.loadNamedStyle(stylepath+file)
                 self.iface.mapCanvas().refreshAllLayers()
+                #Sorting layers
+                layerList = [c.layer() for c in group.children()]
+                my_order = {"Node":0,"Link":1,"Pump":2,"Weir":3,"Orifice":4,"Valve":5,"Catchment":6,"CatchCon":7,"Load":8,"LoadCon":9}
+                sortedList = sorted(layerList,key=lambda val: my_order[val.name()])
+                for idx, lyr in enumerate(sortedList):
+                    group.insertLayer(idx, lyr)
+                group.removeChildren(len(layerList),len(layerList))
+                #Display message if there were errors
+                if errorList:
+                    QMessageBox.about(self.dlg,"Error","The following line(s) were not added due to error:\n\n"+errorList)
             except (WindowsError, IOError):
                 QMessageBox.about(self.dlg,"Error","The folder could not be found")
             except:
                 QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
+            #removing progressBar
+            self.iface.messageBar().clearWidgets()  
 
     #For importing
-    def points(self,input):
+    def points(self,input, group, errorList):
         name = input.readline().rstrip('\n')
         #Set the attribute names and types
         attributes = input.readline().rstrip('\n').split(";;")
-        del attributes[-2:]
         uri = "Point?crs=epsg:3044" + self.createuri(attributes)
         vl = QgsVectorLayer(uri, name, "memory")
         vl.committedGeometriesChanges.connect(self.moveLines)
+        vl.editFormConfig().setReadOnly(vl.fieldNameIndex('X_POINT'),True)
+        vl.editFormConfig().setReadOnly(vl.fieldNameIndex('Y_POINT'),True)
         pr = vl.dataProvider()
         #Get all the data
         data = []
@@ -725,25 +789,33 @@ class mops:
             inputline = input.readline()
         #Insert the data into the layer
         for line in data:
-            fet = QgsFeature()
-            lineList = line.rstrip('\n').split(";;")
-            #Remove last 2 elements and use them for geometry
-            y = float(lineList.pop())
-            x = float(lineList.pop())
-            fet.setGeometry(QgsGeometry.fromPoint(QgsPoint(x, y)))
-            #Changing "NULL" to QGIS.Null
-            lineList2 = []
-            for item in lineList:
-                if item == "NULL":
-                    item = NULL
-                lineList2.append(item)
-            fet.setAttributes(lineList2)
-            pr.addFeatures( [ fet ] )
-            vl.updateExtents()
-        QgsMapLayerRegistry.instance().addMapLayer(vl)
+            try:
+                fet = QgsFeature()
+                lineList = line.rstrip('\n').split(";;")
+                if len(lineList) != len(attributes):
+                    raise
+                #Read last 2 elements and use them for geometry
+                y = float(lineList[-1])
+                x = float(lineList[-2])
+                fet.setGeometry(QgsGeometry.fromPoint(QgsPoint(x, y)))
+                #Changing "NULL" to QGIS.Null
+                lineList2 = []
+                for item in lineList:
+                    if item == "NULL":
+                        item = NULL
+                    lineList2.append(item)
+                fet.setAttributes(lineList2)
+                pr.addFeatures( [ fet ] )
+                vl.updateExtents()
+            except:
+                errorList += line + "\n"
+                #QMessageBox.about(self.dlg,"Error","The following line was not added due to an error: "+line)
+        QgsMapLayerRegistry.instance().addMapLayer(vl,False)   
+        group.addLayer(vl)
+        return errorList
 
     #For importing
-    def lines(self,input):
+    def lines(self,input,group, errorList):
         name = input.readline().rstrip('\n')
         #Set the attribute names and types
         attributes = input.readline().rstrip('\n').split(";;")
@@ -789,26 +861,34 @@ class mops:
             data.append(inputline)
             inputline = input.readline()
         for line in data:
-            lineArray = line.rstrip('\n').split(";;")
-            #Getting coordinates
-            cordList = lineArray.pop().split("::")
-            geoList = []
-            for cord in cordList:
-                xy = cord.split("..")
-                geoList.append(QgsPoint(float(xy[0]),float(xy[1])))
-            fet = QgsFeature()
-            fet.setGeometry(QgsGeometry.fromPolyline(geoList))
-            #Changing "NULL" to NULL
-            lineArray2 = []
-            for item in lineArray:
-                if item == "NULL":
-                    item = NULL
-                lineArray2.append(item)
-            fet.setAttributes(lineArray2)
-            pr.addFeatures( [ fet ] )
-            vl.updateExtents()
+            try:
+                lineArray = line.rstrip('\n').split(";;")
+                #Getting coordinates
+                cordList = lineArray.pop().split("::")
+                if len(lineArray) != len(attributes):
+                    raise
+                geoList = []
+                for cord in cordList:
+                    xy = cord.split("..")
+                    geoList.append(QgsPoint(float(xy[0]),float(xy[1])))
+                fet = QgsFeature()
+                fet.setGeometry(QgsGeometry.fromPolyline(geoList))
+                #Changing "NULL" to NULL
+                lineArray2 = []
+                for item in lineArray:
+                    if item == "NULL":
+                        item = NULL
+                    lineArray2.append(item)
+                fet.setAttributes(lineArray2)
+                pr.addFeatures( [ fet ] )
+                vl.updateExtents()
+            except:
+                errorList += line + "\n"
+                #QMessageBox.about(self.dlg,"Error","The following line was not added due to an error: "+line)  
         vl.committedAttributeValuesChanges.connect(self.moveLinesToNewNodes)
-        QgsMapLayerRegistry.instance().addMapLayer(vl)
+        QgsMapLayerRegistry.instance().addMapLayer(vl,False)
+        group.addLayer(vl)
+        return errorList
 
     def exportdlg(self):
         #Getting recentpaths
@@ -852,14 +932,11 @@ class mops:
             if field.typeName() == "string":
                 line += "::" + str(field.length())
             line += ";;"
-        #add coordinates heading
-        line += "X_POINT;;Y_POINT\n"
+        line = line[:-2] + "\n"
         output_file.write(line)
         #print features
         for f in layer.getFeatures():
-            line = ';;'.join(unicode(f[x]) for x in fieldnames)
-            geom = f.geometry()
-            line += ";;" + str(geom.asPoint().x()) + ";;" + str(geom.asPoint().y()) + "\n"
+            line = ';;'.join(unicode(f[x]) for x in fieldnames) + '\n'
             output_file.write(line)
         output_file.write("ENDOFPOINTS\n")
         
@@ -928,9 +1005,18 @@ class mops:
         dialog.textEdit.addItems(content[lowNum:highNum])
         return content
 
-    def updateRecentPaths(self,folderpath,lowNum,HighNum,content):
-        if folderpath not in content[lowNum:HighNum]:
+    def updateRecentPaths(self,folderpath,lowNum,highNum,content):
+        #If it's not in recentPaths or at the bottom, add it to the top of the list 
+        if folderpath not in content[lowNum:highNum] or folderpath == content[lowNum+2]:
             content[lowNum+2] = content[lowNum+1]
+            content[lowNum+1] = content[lowNum]
+            content[lowNum] = folderpath
+            output_file = codecs.open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w', encoding='utf-8')
+            for line in content:
+                output_file.write(line+"\n")
+            output_file.close()
+        #If it's in the middle
+        elif content.index(folderpath)-lowNum == 1:
             content[lowNum+1] = content[lowNum]
             content[lowNum] = folderpath
             output_file = codecs.open(expanduser("~") + "\\.qgis2\\python\\plugins\\mops\\" + "RecentPaths.txt", 'w', encoding='utf-8')

@@ -10,7 +10,7 @@
 name=MOPS plugin
 qgisMinimumVersion=2.0
 description=A plugin for QGIS by LNH Water ApS
-version=0.6.5
+version=0.7.0
 author=LNH Water ApS
 email=kontakt@lnhwater.dk
 
