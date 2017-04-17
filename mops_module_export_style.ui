@@ -32,8 +32,8 @@
   <widget class="QPushButton" name="pushButton">
    <property name="geometry">
     <rect>
-     <x>290</x>
-     <y>150</y>
+     <x>280</x>
+     <y>120</y>
      <width>91</width>
      <height>23</height>
     </rect>
@@ -45,8 +45,8 @@
   <widget class="QComboBox" name="textEdit">
    <property name="geometry">
     <rect>
-     <x>20</x>
-     <y>150</y>
+     <x>10</x>
+     <y>120</y>
      <width>251</width>
      <height>31</height>
     </rect>
@@ -127,6 +127,29 @@
    </property>
    <property name="text">
     <string>styles for the layers, then these will be overwritten.</string>
+   </property>
+  </widget>
+  <widget class="QComboBox" name="groupBox">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>200</y>
+     <width>251</width>
+     <height>22</height>
+    </rect>
+   </property>
+  </widget>
+  <widget class="QLabel" name="label_4">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>180</y>
+     <width>221</width>
+     <height>16</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>Choose the group to perform the action for.</string>
    </property>
   </widget>
  </widget>

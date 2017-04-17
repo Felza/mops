@@ -22,7 +22,7 @@
 """
 from PyQt4.QtCore import *
 from qgis.core import *
-from qgis.core import NULL
+from qgis.core import NULL, QgsLayerTreeGroup, QgsLayerTreeLayer
 from PyQt4.QtGui import QAction, QIcon, QFileDialog, QMessageBox, QProgressBar
 # Initialize Qt resources from file resources.py
 import resources
@@ -34,6 +34,7 @@ from mops_module_export_polygon_to_text import exportPolygonToTextDialog
 from mops_module_export_style import exportStyle
 from mops_module_export_polygonChanges import exportPolygonChanges
 from mops_module_calculate_raster import calculateRaster
+from mops_module_import_project import importProjectDialog
 from os.path import isfile, join, expanduser, isdir
 import os.path
 from os import listdir
@@ -162,6 +163,8 @@ class mops:
         self.dlg6.pushButton.clicked.connect(lambda: self.select_output_folder(self.dlg6))
         self.dlg7 = calculateRaster()
         self.dlg7.pushButton.clicked.connect(lambda: self.select_output_folder(self.dlg7))
+        self.dlg8 = importProjectDialog()
+        self.dlg8.pushButton.clicked.connect(lambda: self.select_input_file(self.dlg8, '*.qgs','Choose the project to open'))
         icon = QIcon(icon_path)
         action = QAction(icon, text, parent)
         action.triggered.connect(callback)
@@ -231,6 +234,11 @@ class mops:
             callback=self.calculateRaster,
             parent=self.iface.mainWindow())
         
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Open a QGIS-MOPS project'),
+            callback=self.importProjectDialog,
+            parent=self.iface.mainWindow())
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
@@ -241,6 +249,40 @@ class mops:
             self.iface.removeToolBarIcon(action)
         # remove the toolbar
         del self.toolbar
+
+    def importProjectDialog(self):
+        recentPaths = self.getRecentPaths(self.dlg8,21,24)
+        # show the dialog
+        self.dlg8.show()
+        # Run the dialog event loop
+        result = self.dlg8.exec_()
+        # See if OK was pressed
+        if result:
+            #Update combobox of recent paths by adding the new one
+            filepath = self.dlg8.textEdit.currentText()
+            self.updateRecentPaths(filepath,21,24,recentPaths)
+            try:
+                reply = QMessageBox.Yes
+                project = QgsProject.instance()
+                if project.isDirty():
+                    reply = QMessageBox.question(self.iface.mainWindow(), 'Warning', 
+                 'The current project has unsaved changes, continuing will result in these changes being lost.\nContinue?', QMessageBox.Yes, QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    print(project.read(QFileInfo(filepath)))
+                    #Add functionality
+                    layers = self.iface.legendInterface().layers()
+                    for layer in layers:
+                        if type(layer) is QgsVectorLayer:
+                            #Points
+                            if layer.wkbType()==1:
+                                layer.committedGeometriesChanges.connect(self.moveLines)
+                            #Lines
+                            if layer.wkbType()==2:
+                                layer.committedAttributeValuesChanges.connect(self.moveLinesToNewNodes)
+            except (WindowsError, IOError):
+                QMessageBox.about(self.dlg,"Error","The filepath could not be found")
+            except:
+                QMessageBox.about(self.dlg,"Error","Unexpected error: " + str(traceback.format_exc()))
 
     def calculateRaster(self):
         #Getting recentpaths
@@ -389,6 +431,13 @@ class mops:
     def exportOrSaveStyle(self):
         #Getting recentpaths
         recentPaths = self.getRecentPaths(self.dlg6,12,15)
+        #Get the groups for the comboBox
+        groups = []
+        for node in QgsProject.instance().layerTreeRoot().children():
+            if isinstance(node,QgsLayerTreeGroup):
+                groups.append(node.name())
+        self.dlg6.groupBox.clear()
+        self.dlg6.groupBox.addItems(groups)
         # show the dialog
         self.dlg6.choice_import.click()
         self.dlg6.show()
@@ -396,11 +445,13 @@ class mops:
         result = self.dlg6.exec_()
         # See if OK was pressed
         if result:
+            #Get the layers in the group
+            group = QgsProject.instance().layerTreeRoot().findGroup(self.dlg6.groupBox.currentText())
             #Update combobox of recent paths by adding the new one
             folderpath = self.dlg6.textEdit.currentText()
             fileCounter = len(glob.glob1(folderpath,"*.qml"))
             reply = QMessageBox.Yes
-            if fileCounter > 0:
+            if fileCounter > 0 and self.dlg6.choice_save.isChecked():
                 reply = QMessageBox.question(self.iface.mainWindow(), 'Warning', 
                  'This folder already contain styles. Styles with identical names will be overwritten.\nAre you sure you want to continue?', QMessageBox.Yes, QMessageBox.No)
             if reply == QMessageBox.Yes:
@@ -409,14 +460,16 @@ class mops:
                 try:
                     if self.dlg6.choice_save.isChecked():
                         #Save styles in chosen folder
-                        for layer in self.iface.legendInterface().layers():
-                            layer.saveNamedStyle(folderpath + "\\" + layer.name() + ".qml")
+                        for layer in group.children():
+                            if isinstance(layer,QgsLayerTreeLayer):
+                                layer.layer().saveNamedStyle(folderpath + "\\" + layer.name() + ".qml")
                     else:
                         #Import styles from chosen folder
                         for file in [f for f in listdir(folderpath) if isfile(join(folderpath, f))]:
                             if file[-4:] == ".qml":
-                                for layer in QgsMapLayerRegistry.instance().mapLayersByName(file[:-4]):
-                                    layer.loadNamedStyle(folderpath + "\\" + file)
+                                for layer in group.children():
+                                    if isinstance(layer,QgsLayerTreeLayer) and layer.name() == file[:-4]:
+                                        layer.layer().loadNamedStyle(folderpath + "\\" + file)
                         self.iface.mapCanvas().refreshAllLayers()
                 except (WindowsError, IOError):
                     QMessageBox.about(self.dlg,"Error","The folder could not be found")
@@ -980,8 +1033,12 @@ class mops:
         dialog.textEdit.lineEdit().setText(foldername)
 
     def select_output_dlg5(self):
-        filename = QFileDialog.getOpenFileName(self.dlg5, "Select larger layer ","", '*.shp')
+        filename = QFileDialog.getOpenFileName(self.dlg5, "Select larger layer ", self.dlg5.textEdit.currentText(), '*.shp')
         self.dlg5.textEdit.lineEdit().setText(filename)
+
+    def select_input_file(self, dialog, fileType, text):
+        filename = QFileDialog.getOpenFileName(dialog, text, dialog.textEdit.currentText(), fileType)
+        dialog.textEdit.lineEdit().setText(filename)
 
     def createuri(self, attributes):
         uri = "";
