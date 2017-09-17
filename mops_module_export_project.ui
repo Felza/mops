@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Import</string>
+   <string>Save Project</string>
   </property>
   <widget class="QDialogButtonBox" name="button_box">
    <property name="geometry">
@@ -39,7 +39,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>Choose textfile folder</string>
+    <string>Browse location</string>
    </property>
   </widget>
   <widget class="QComboBox" name="textEdit">
@@ -53,51 +53,6 @@
    </property>
    <property name="editable">
     <bool>true</bool>
-   </property>
-  </widget>
-  <widget class="QCheckBox" name="checkBox">
-   <property name="geometry">
-    <rect>
-     <x>20</x>
-     <y>150</y>
-     <width>251</width>
-     <height>17</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>Use catchment shapefile from another location</string>
-   </property>
-  </widget>
-  <widget class="QComboBox" name="textEdit_2">
-   <property name="geometry">
-    <rect>
-     <x>18</x>
-     <y>180</y>
-     <width>221</width>
-     <height>31</height>
-    </rect>
-   </property>
-   <property name="editable">
-    <bool>true</bool>
-   </property>
-   <property name="visible">
-	<bool>false</bool>
-   </property>
-  </widget>
-  <widget class="QPushButton" name="pushButton_2">
-   <property name="geometry">
-    <rect>
-     <x>260</x>
-     <y>180</y>
-     <width>121</width>
-     <height>23</height>
-    </rect>
-   </property>
-   <property name="text">
-    <string>Choose catchment file</string>
-   </property>
-   <property name="visible">
-	<bool>false</bool>
    </property>
   </widget>
  </widget>
