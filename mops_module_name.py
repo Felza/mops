@@ -593,15 +593,24 @@ class mops:
         d = self.y0-(float(y2)*self.scaleY)
         self.painter.setPen(style)
         self.painter.drawLine(a,b,c,d)
-        
-    def drawVerticalText(self,x,y,text):
-        self.painter.translate(x,y)
-        self.painter.rotate(-90)
+       
+    def drawText(self,x,y,text):
         x1 = self.x0+(float(x)*self.scaleX)
         y1 = self.y0-(float(y)*self.scaleY)
-        self.painter.drawText(x1,y1,text)
+        #+2 for placement correction
+        self.painter.drawText(x1+2,y1,text)
+
+
+    
+    def drawVerticalText(self,x,y,text):
+        x1 = self.x0+(float(x)*self.scaleX)
+        y1 = self.y0-(float(y)*self.scaleY)
+        self.painter.translate(x1,y1)
         self.painter.rotate(90)
-        self.painter.restore()
+        self.painter.translate(-x1,-y1)
+        #+15 and -2 so the text is not inside the node
+        self.painter.drawText(x1+15,y1-2,text)
+        self.painter.resetTransform()
     
     def drawAxes(self,features):
         maxX = 1000
@@ -647,6 +656,12 @@ class mops:
                             if lineLayerName == "Link":
                                 if lineFeature["Length"]:
                                     lengths.append(float(lineFeature["Length"]))
+                                else:
+                                    lengths.append(lineFeature.geometry().length())
+							#Weirs need to be presented as atleast 10 meters
+                            elif lineLayerName == "Weir":
+                                if lineFeature.geometry().length() < 10.0:
+                                    lengths.append(10.0)
                                 else:
                                     lengths.append(lineFeature.geometry().length())
                             else:
@@ -712,7 +727,8 @@ class mops:
             y2 = float(n['InvertLevel'])
             self.drawLine(x,y1,x,y2,1)
             #Draw the node text
-            #self.drawVerticalText(x,y1,n['MUID'])
+            self.drawVerticalText(x,y1,n['MUID'])
+            #self.drawText(x,y1,n['MUID'])
             #Draw top lines
             if lastNode is not NULL:
                 self.drawLine(lastLength,float(lastNode['GroundLevel']),x,float(n['GroundLevel']),1)
@@ -750,6 +766,8 @@ class mops:
                     self.drawLine(x1,y1,x2,y2,1)
                     #Draw the top of the pipe
                     self.drawLine(x1,float(y1)+float(feature['Diameter']),x2,float(y2)+float(feature['Diameter']),1)
+                    #Draw diameter
+                    self.drawText(x1,float(y1)+float(feature['Diameter']),"D: "+feature['Diameter']+"m")
                 if layername == "Orifice":
                     #Draw the bottom of the pipe
                     type = feature['TypeNo']
@@ -769,6 +787,8 @@ class mops:
                     elif type == 3:
                         top = float(feature['Height'])
                     self.drawLine(x1,float(y1)+top,x2,float(y2)+top,1)
+                    #Draw diameter
+                    self.drawText(x1,float(y1)+top,"D: "+str(top)+"m")
                 if layername == "Valve":
                     #Draw the bottom of the pipe
                     node = nodes[i]
@@ -783,6 +803,8 @@ class mops:
                     #Draw the top of the pipe
                     top = float(feature['Diameter'])
                     self.drawLine(x1,float(y1)+top,x2,float(y2)+top,1)
+                    #Draw diameter
+                    self.drawText(x1,float(y1)+top,"D: "+str(top)+"m")
                 if layername == "Weir":
                     #Draw the bottom of the pipe
                     x1 = 0.0
@@ -803,6 +825,7 @@ class mops:
                     x2 = x1 + lineLengths[i]
                     self.drawLine(x1,y1,x2,y2,2)
 
+
     def profile(self, features):
         layer = QgsMapLayerRegistry.instance().mapLayersByName("Node")[0]
         #Create image and painter
@@ -811,7 +834,7 @@ class mops:
         self.y0 = self.height-60
         self.scaleX = 1.0
         self.scaleY = 1.0
-        image = QImage(1200,self.height,QImage.Format_RGB32)
+        image = QImage(1120,self.height,QImage.Format_RGB32)
         image.fill(Qt.white)
         self.painter = QPainter()
         self.painter.begin(image)
