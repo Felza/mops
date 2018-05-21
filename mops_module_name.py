@@ -21,6 +21,7 @@
  ***************************************************************************/
 """
 from PyQt4.QtCore import *
+from PyQt4.QtCore import QVariant
 from qgis.gui import *
 from qgis.core import *
 from qgis.core import NULL, QgsLayerTreeGroup, QgsLayerTreeLayer
@@ -39,6 +40,8 @@ from mops_module_import_project import importProjectDialog
 from mops_module_profile import profilePicture
 from mops_module_reload import reloadDialog
 from mops_module_export_project import exportProjectDialog
+
+
 from os.path import isfile, join, expanduser, isdir
 import os.path
 from os import listdir
@@ -48,6 +51,8 @@ import glob
 from math import log10, floor
 import xml.etree.ElementTree
 from shutil import copyfile
+from osgeo import gdal, ogr, osr
+import numpy as np
 
 class LNode(object):
     def __init__(self,feat, before, highlight):
@@ -442,6 +447,12 @@ class mops:
             callback=self.reloadData,
             parent=self.iface.mainWindow())
 
+        self.add_action(
+            icon_path,
+            text=self.tr(u'Update polygon area values'),
+            callback=self.updatePolygonValues,
+            parent=self.iface.mainWindow())
+
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
         for action in self.actions:
@@ -451,6 +462,156 @@ class mops:
             self.iface.removeToolBarIcon(action)
         # remove the toolbar
         del self.toolbar
+
+    def updatePolygonValues(self):
+        layer1 = processing.getObject(Point_Vector)
+        crs = layer1.crs().toWkt()
+        layer2 = processing.getObject(Polygon_Vector)
+ 
+        # Create the output layer
+        outLayer = QgsVectorLayer('Polygon?crs='+ crs, 'outLayer' , 'memory')
+        prov = outLayer.dataProvider()
+        fields = layer2.pendingFields() # Fields from the input layer
+        fields.append(QgsField('COUNT', QVariant.Int, '', 10, 0))
+        prov.addAttributes(fields) # Add input layer fields to the outLayer
+        outLayer.updateFields()
+ 
+        points = [feat for feat in layer1.getFeatures()]
+        polygons = [feat for feat in layer2.getFeatures()]
+ 
+        index = QgsSpatialIndex() # this spatial index contains all the features of the point layer
+        for point in points:
+            index.insertFeature(point)
+ 
+        for polygon in polygons:
+            inAttr = polygon.attributes() # Input attributes
+            poly_geom = polygon.geometry() #Input geometry
+            engine = QgsGeometry.createGeometryEngine(poly_geom.geometry())
+            engine.prepareGeometry()
+            idsList = index.intersects(poly_geom.boundingBox())
+            count = 0
+            if len(idsList) > 0:
+                req = QgsFeatureRequest().setFilterFids(idsList)
+                for fit in layer1.getFeatures(req):
+                    geom = fit.geometry()
+                    if engine.contains(geom.geometry()):
+                        count += 1
+            outGeom = QgsFeature()
+            inAttr.append(count)
+            outGeom.setAttributes(inAttr) # Output attributes
+            outGeom.setGeometry(poly_geom) # Output geometry
+            prov.addFeatures([outGeom]) # Output feature
+ 
+        # Add the layer to the Layers panel
+        QgsMapLayerRegistry.instance().addMapLayer(outLayer)
+
+
+
+
+
+
+
+        #layer = QgsMapLayerRegistry.instance().mapLayersByName("Oplande")[0]
+        #rasterlayer = QgsMapLayerRegistry.instance().mapLayersByName("test")[0]
+        #decimals = 0
+        #histogram = False
+        ## Open data
+        #path = rasterlayer.dataProvider().dataSourceUri()
+        #if '|' in path:
+        #    path = path [:path.rfind('|')]
+        #raster = gdal.Open(path)
+
+        #path = layer.dataProvider().dataSourceUri()
+        #if '|' in path:
+        #    path = path [:path.rfind('|')]
+        #shp = ogr.Open(path)
+        #lyr = shp.GetLayer()
+
+        #i = 0
+        ## Get raster georeference info
+        #featList = range(lyr.GetFeatureCount())
+        #for FID in featList:
+        #    feat = lyr.GetFeature(FID)
+        #    transform = raster.GetGeoTransform()
+        #    xOrigin = transform[0]
+        #    yOrigin = transform[3]
+        #    pixelWidth = transform[1]
+        #    pixelHeight = transform[5]
+
+        #    # Reproject vector geometry to same projection as raster
+        #    sourceSR = lyr.GetSpatialRef()
+        #    targetSR = osr.SpatialReference()
+        #    targetSR.ImportFromWkt(raster.GetProjectionRef())
+        #    coordTrans = osr.CoordinateTransformation(sourceSR,targetSR)
+        #    geom = feat.GetGeometryRef()
+        #    geom.Transform(coordTrans)
+
+        #    # Get extent of feat
+        #    geom = feat.GetGeometryRef()
+        #    if (geom.GetGeometryName() == 'MULTIPOLYGON'):
+        #        count = 0
+        #        pointsX = []; pointsY = []
+        #        for polygon in geom:
+        #            geomInner = geom.GetGeometryRef(count)
+        #            ring = geomInner.GetGeometryRef(0)
+        #            numpoints = ring.GetPointCount()
+        #            for p in range(numpoints):
+        #                    lon, lat, z = ring.GetPoint(p)
+        #                    pointsX.append(lon)
+        #                    pointsY.append(lat)
+        #            count += 1
+        #    elif (geom.GetGeometryName() == 'POLYGON'):
+        #        ring = geom.GetGeometryRef(0)
+        #        numpoints = ring.GetPointCount()
+        #        pointsX = []; pointsY = []
+        #        for p in range(numpoints):
+        #                lon, lat, z = ring.GetPoint(p)
+        #                pointsX.append(lon)
+        #                pointsY.append(lat)
+
+        #    else:
+        #        sys.exit("ERROR: Geometry needs to be either Polygon or Multipolygon")
+
+        #    xmin = min(pointsX)
+        #    xmax = max(pointsX)
+        #    ymin = min(pointsY)
+        #    ymax = max(pointsY)
+
+        #    # Specify offset and rows and columns to read
+        #    xoff = int((xmin - xOrigin)/pixelWidth)
+        #    yoff = int((yOrigin - ymax)/pixelWidth)
+        #    xcount = int((xmax - xmin)/pixelWidth)+1
+        #    ycount = int((ymax - ymin)/pixelWidth)+1
+
+        #    # Create memory target raster
+        #    target_ds = gdal.GetDriverByName('MEM').Create('', xcount, ycount, 1, gdal.GDT_Byte)
+        #    target_ds.SetGeoTransform((
+        #        xmin, pixelWidth, 0,
+        #        ymax, 0, pixelHeight,
+        #    ))
+
+        #    # Create for target raster the same projection as for the value raster
+        #    raster_srs = osr.SpatialReference()
+        #    raster_srs.ImportFromWkt(raster.GetProjectionRef())
+        #    target_ds.SetProjection(raster_srs.ExportToWkt())
+
+        #    # Rasterize zone polygon to raster
+        #    gdal.RasterizeLayer(target_ds, [1], lyr, burn_values=[1])
+
+
+        #    try:
+        #        # Read raster as arrays
+        #        banddataraster = raster.GetRasterBand(1)
+        #        dataraster = banddataraster.ReadAsArray(xoff, yoff, xcount, ycount).astype(np.float)
+        #       # print dataraster
+        #        unique, counts = np.unique(dataraster, return_counts=True)
+        #        print feat['MOPSid'], feat['a_count'], feat['a_sum'], feat['a_majority']
+        #        print dict(zip(unique, counts))
+        #        print sum((dict(zip(unique, counts))).values())
+                
+        #    except:
+        #        print feat['MOPSid']
+        #        print str(traceback.format_exc())
 
     def reloadData(self):
         recentPaths = self.getRecentPaths(self.dlg10,0,3)
@@ -1454,11 +1615,14 @@ class mops:
                     if v  in int_list:
                         newFeatures.append(dict_feat_a[k])
                 small = QgsVectorLayer("Polygon?crs=epsg:3044", large.name()+"_SMALL", "memory")
+                #startEditing + commitChanges added because of a bug introduced in QGIS 2.18.11
+                small.startEditing()
                 fields = large.fields()
                 pr = small.dataProvider()
                 pr.addAttributes(fields)
                 pr.addFeatures(newFeatures)
                 small.updateExtents()
+                small.commitChanges()
                 #Load in the "small polygon layer" in the bottom of the layer table
                 QgsMapLayerRegistry.instance().addMapLayer(small, False)
                 QgsProject.instance().layerTreeRoot().addLayer(small)
@@ -1729,6 +1893,14 @@ class mops:
             output_file.close()
 
     def importCheckBox(self,state):
+        if state == 2:
+            self.dlg.textEdit_2.setShown(True)
+            self.dlg.pushButton_2.setShown(True)
+        else:
+            self.dlg.textEdit_2.setShown(False)
+            self.dlg.pushButton_2.setShown(False)
+
+    def updatePolygonValuesCheckBox(self,state):
         if state == 2:
             self.dlg.textEdit_2.setShown(True)
             self.dlg.pushButton_2.setShown(True)
